@@ -1,0 +1,1489 @@
+<!--
+  Ai4 Sponsors Widget — Production Embed
+  =======================================
+  Drop this into a WordPress Custom HTML block (or any page).
+  Self-contained: HTML + CSS + JS in one file. No external runtime deps
+  besides Lato (Google Fonts) — same as the speakers widget.
+
+  Configuration:
+    Set WORKER_URL below to your deployed Cloudflare Worker.
+    The worker handles: /sponsors (full payload) and /sessions?id=... (per-sponsor).
+
+  Visual language:
+    - Cream page bg, light-gray cards, hover gradient border (purple→gold)
+    - Tier sections with header (Diamond, Platinum, Gold, …)
+    - Cards show ONLY logo + booth number (no company name)
+    - Click any card → modal with full sponsor profile
+    - Filters live in a horizontal bar at the top so the grid runs full width
+-->
+<div id="ai4-sponsors-root" class="ai4-sponsors-scope">
+<style>
+  /* ===== Scoped reset ===== */
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope), :is(#ai4-sponsors-root, .ai4-sponsors-scope) * { box-sizing: border-box; }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) { font-family: 'Lato', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; color: #1a1a1a; }
+
+  /* ===== WordPress theme defense =====
+     Themes commonly apply aggressive font-size/weight/margin to headings, paragraphs,
+     buttons, and form controls. We neutralize them all here and re-declare what we
+     need on each component below. The button rule is critical — without it, themes
+     paint backgrounds and borders on every <button> we render. */
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) h1, :is(#ai4-sponsors-root, .ai4-sponsors-scope) h2, :is(#ai4-sponsors-root, .ai4-sponsors-scope) h3,
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) h4, :is(#ai4-sponsors-root, .ai4-sponsors-scope) h5, :is(#ai4-sponsors-root, .ai4-sponsors-scope) h6,
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) p, :is(#ai4-sponsors-root, .ai4-sponsors-scope) button, :is(#ai4-sponsors-root, .ai4-sponsors-scope) input,
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) label, :is(#ai4-sponsors-root, .ai4-sponsors-scope) span, :is(#ai4-sponsors-root, .ai4-sponsors-scope) div {
+    font-family: inherit;
+    line-height: inherit;
+    letter-spacing: normal;
+    text-transform: none;
+    margin: 0;
+    padding: 0;
+  }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) button { background: none; border: none; }
+
+  /* ===== Design tokens ===== */
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) {
+    --a4-purple: #6B46C1;
+    --a4-purple-dark: #553C9A;
+    --a4-gold: #D4A574;
+    --a4-cream: #F5F1E8;
+    --a4-card-bg: #EFEFEF;
+    --a4-card-bg-hover: #F5ECDC;
+    --a4-card-radius: 14px;
+    --a4-text-primary: #1a1a1a;
+    --a4-text-secondary: #555;
+    --a4-text-muted: #888;
+    --a4-border-light: #E0E0E0;
+    --a4-shadow-sm: 0 1px 3px rgba(0,0,0,0.04);
+    --a4-shadow-md: 0 4px 16px rgba(0,0,0,0.08);
+    --a4-shadow-lg: 0 12px 40px rgba(0,0,0,0.18);
+    --a4-grad: linear-gradient(135deg, #6B46C1 0%, #D4A574 100%);
+  }
+
+  /* ===== Layout ===== */
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-wrap { max-width: 1280px; margin: 0 auto; padding: 24px 20px 64px !important; }
+
+  /* ===== Filter bar ===== */
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-filters {
+    display: flex !important; flex-wrap: wrap; gap: 12px !important; align-items: center;
+    background: #fff; border: 1px solid var(--a4-border-light);
+    border-radius: var(--a4-card-radius);
+    padding: 14px 16px !important; margin: 0 0 28px !important;
+    box-shadow: var(--a4-shadow-sm);
+  }
+  .a4s-search {
+    flex: 1 1 240px; min-width: 200px; position: relative;
+  }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-search input {
+    width: 100% !important; padding: 10px 14px 10px 38px !important;
+    border: 1px solid var(--a4-border-light) !important; border-radius: 10px !important;
+    font: 500 14px/1.4 'Lato', sans-serif !important; color: var(--a4-text-primary) !important;
+    background: #fafafa !important; outline: none; transition: all 0.15s;
+    height: auto !important; min-height: 0 !important;
+    vertical-align: middle !important; box-shadow: none;
+  }
+  .a4s-search input:focus { border-color: var(--a4-purple); background: #fff; box-shadow: 0 0 0 3px rgba(107,70,193,0.10); }
+  .a4s-search::before {
+    content: ""; position: absolute; left: 13px; top: 50%; transform: translateY(-50%);
+    width: 16px; height: 16px;
+    background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='7'/><path d='m21 21-4.3-4.3'/></svg>") center/contain no-repeat;
+    pointer-events: none;
+  }
+  .a4s-filter-select {
+    position: relative; min-width: 180px;
+  }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-filter-select > button {
+    width: 100%; text-align: left;
+    padding: 10px 36px 10px 14px;
+    background: #fafafa; border: 1px solid var(--a4-border-light); border-radius: 10px;
+    font: 500 14px/1.4 'Lato', sans-serif; color: var(--a4-text-primary);
+    cursor: pointer; transition: all 0.15s; position: relative;
+  }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-filter-select > button:hover { background: #fff; border-color: #c5c5c5; }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-filter-select.open > button { background: #fff; border-color: var(--a4-purple); box-shadow: 0 0 0 3px rgba(107,70,193,0.10); }
+  .a4s-filter-select > button::after {
+    content: ""; position: absolute; right: 14px; top: 50%; width: 10px; height: 10px;
+    border-right: 2px solid #888; border-bottom: 2px solid #888;
+    transform: translateY(-70%) rotate(45deg); transition: transform 0.15s;
+  }
+  .a4s-filter-select.open > button::after { transform: translateY(-30%) rotate(-135deg); }
+  .a4s-filter-select .a4s-count-badge {
+    display: inline-block; min-width: 20px; padding: 1px 6px;
+    background: var(--a4-purple); color: #fff;
+    border-radius: 10px; font-size: 11px; font-weight: 700; margin-left: 6px;
+    text-align: center;
+  }
+  .a4s-dropdown {
+    position: absolute; top: calc(100% + 6px); left: 0; right: 0; min-width: 240px;
+    background: #fff; border: 1px solid var(--a4-border-light); border-radius: 12px;
+    box-shadow: var(--a4-shadow-md);
+    max-height: 320px; overflow-y: auto;
+    padding: 6px; z-index: 50;
+    display: none;
+  }
+  .a4s-filter-select.open .a4s-dropdown { display: block; }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-dropdown label {
+    display: flex !important; align-items: center; gap: 10px;
+    padding: 10px 14px !important; margin: 0 !important;
+    border-radius: 8px; cursor: pointer;
+    font-size: 13.5px !important; line-height: 1.4 !important;
+    color: var(--a4-text-primary);
+  }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-dropdown label input[type="checkbox"] {
+    margin: 0 !important; flex: 0 0 auto;
+  }
+  .a4s-dropdown label:hover { background: #f5f0e8; }
+  .a4s-dropdown input[type="checkbox"] { accent-color: var(--a4-purple); width: 16px; height: 16px; }
+  .a4s-clear-btn {
+    background: transparent; border: 1px solid var(--a4-border-light);
+    color: var(--a4-text-secondary);
+    padding: 9px 14px; border-radius: 10px;
+    font: 600 13px/1 'Lato', sans-serif; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .a4s-clear-btn:hover { color: var(--a4-purple); border-color: var(--a4-purple); background: #fff; }
+
+  /* ===== Tier sections ===== */
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-tier-section { margin-top: 36px !important; }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-tier-section:first-of-type { margin-top: 8px !important; }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-tier-header {
+    display: flex !important; align-items: baseline; gap: 14px;
+    margin: 0 0 18px !important; padding: 0 0 10px !important;
+    border-bottom: 1px solid var(--a4-border-light);
+  }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-tier-name {
+    font-family: 'Lato', sans-serif !important; font-weight: 800 !important; font-size: 22px !important;
+    line-height: 1.2 !important; letter-spacing: -0.01em;
+    color: var(--a4-text-primary) !important; margin: 0 !important;
+  }
+
+  /* ===== Card grid ===== */
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-grid {
+    display: grid !important; gap: 16px !important;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  }
+
+  /* ===== Card ===== */
+  .a4s-card {
+    position: relative; cursor: pointer;
+    background: var(--a4-card-bg); border-radius: var(--a4-card-radius);
+    padding: 0; overflow: hidden;
+    box-shadow: var(--a4-shadow-sm);
+    transition: background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+  }
+  .a4s-card::before {
+    /* gradient border, only visible on hover (padding-box / border-box trick) */
+    content: ""; position: absolute; inset: 0;
+    border-radius: var(--a4-card-radius); padding: 2px;
+    background: var(--a4-grad);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+    pointer-events: none;
+    opacity: 0; transition: opacity 0.18s ease;
+  }
+  .a4s-card:hover {
+    background: var(--a4-card-bg-hover);
+    transform: translateY(-2px);
+    box-shadow: var(--a4-shadow-md);
+  }
+  .a4s-card:hover::before { opacity: 1; }
+  .a4s-card:focus-visible { outline: 3px solid var(--a4-purple); outline-offset: 2px; }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-card-logo {
+    aspect-ratio: 4/3;
+    background: #fff;
+    display: flex; align-items: center; justify-content: center;
+    padding: 22px 26px !important;
+    border-bottom: 1px solid rgba(0,0,0,0.04);
+  }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-card-logo img {
+    max-width: 88% !important; max-height: 88% !important;
+    object-fit: contain; display: block;
+  }
+  .a4s-card-logo.is-empty {
+    background: linear-gradient(135deg, #fafafa, #f0eadd);
+    color: var(--a4-text-muted); font-weight: 700; font-size: 14px;
+    text-align: center; padding: 8px 14px;
+  }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-card-meta {
+    text-align: center;
+    padding: 14px 12px 16px !important;
+    font-size: 14px !important; font-weight: 600 !important;
+    color: var(--a4-text-primary);
+  }
+  .a4s-card-meta .a4s-booth-prefix {
+    display: block; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--a4-text-muted); margin-bottom: 3px;
+  }
+
+  /* ===== Loading skeletons ===== */
+  .a4s-skeleton {
+    background: #ECECEC;
+    border-radius: var(--a4-card-radius);
+    height: 240px;
+    position: relative; overflow: hidden;
+  }
+  .a4s-skeleton::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent);
+    animation: a4s-shimmer 1.4s infinite;
+  }
+  @keyframes a4s-shimmer {
+    from { transform: translateX(-100%); }
+    to   { transform: translateX(100%); }
+  }
+
+  /* ===== Empty / error states ===== */
+  .a4s-empty, .a4s-error {
+    text-align: center; padding: 80px 24px;
+    color: var(--a4-text-secondary); font-size: 15px;
+  }
+  .a4s-error { color: #c0392b; }
+
+  /* ===== Modal =====
+     The backdrop is moved to document.body at startup so no ancestor transform/
+     filter on the theme can break position:fixed. We still use !important on the
+     positioning properties as belt-and-suspenders against aggressive themes. */
+  .a4s-modal-backdrop {
+    position: fixed !important;
+    top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+    inset: 0 !important;
+    width: 100vw !important; height: 100vh !important;
+    margin: 0 !important; padding: 32px 16px !important;
+    background: rgba(20,15,30,0.55);
+    backdrop-filter: blur(4px);
+    z-index: 999999 !important;
+    display: none; align-items: flex-start; justify-content: center;
+    overflow-y: auto;
+    animation: a4s-fade 0.18s ease-out;
+    font-family: 'Lato', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+  .a4s-modal-backdrop.open { display: flex !important; }
+  @keyframes a4s-fade { from { opacity: 0; } to { opacity: 1; } }
+
+  .a4s-modal {
+    background: #fff; border-radius: 18px;
+    max-width: 760px; width: 100%;
+    box-shadow: var(--a4-shadow-lg);
+    position: relative;
+    animation: a4s-pop 0.22s ease-out;
+    margin: auto;
+  }
+  @keyframes a4s-pop {
+    from { opacity: 0; transform: translateY(12px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-modal-close {
+    position: absolute; top: 14px; right: 14px;
+    width: 36px; height: 36px; border-radius: 50%;
+    background: #f5f0e8; border: none; cursor: pointer;
+    font-size: 22px; line-height: 1; color: #555;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+  }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-modal-close:hover { background: var(--a4-purple); color: #fff; transform: rotate(90deg); }
+
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-modal-head {
+    display: flex; gap: 22px; align-items: flex-start;
+    padding: 28px 28px 22px !important;
+    border-bottom: 1px solid var(--a4-border-light);
+  }
+  .a4s-modal-logo {
+    flex: 0 0 140px; width: 140px; height: 90px;
+    background: #fff; border: 1px solid var(--a4-border-light);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 12px;
+  }
+  .a4s-modal-logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-modal-head-text { flex: 1; min-width: 0; padding-top: 4px; }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-modal-head-text h2 {
+    margin: 0 0 6px !important; font-size: 26px !important; font-weight: 800 !important;
+    line-height: 1.2 !important; letter-spacing: -0.01em; color: var(--a4-text-primary);
+  }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-modal-tier {
+    display: inline-block; font-size: 12px !important; font-weight: 700 !important;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    background: var(--a4-grad); color: #fff;
+    padding: 4px 14px !important; border-radius: 6px;
+    margin: 0 0 10px !important; line-height: 1.5 !important;
+  }
+  .a4s-modal-booth {
+    font-size: 14px; color: var(--a4-text-secondary);
+    display: flex; align-items: center; gap: 6px; margin-top: 4px;
+  }
+  .a4s-modal-booth::before {
+    content: ""; width: 14px; height: 14px; flex: 0 0 14px;
+    background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z'/><circle cx='12' cy='10' r='3'/></svg>") center/contain no-repeat;
+  }
+
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-modal-body { padding: 22px 28px 28px !important; }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-modal-section { margin-top: 22px !important; }
+  .a4s-modal-section:first-child { margin-top: 0 !important; }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-modal-section h3 {
+    margin: 0 0 10px !important;
+    font-size: 12px !important; font-weight: 800 !important; text-transform: uppercase;
+    letter-spacing: 0.1em; color: var(--a4-text-muted);
+  }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-modal-section p {
+    margin: 0 !important; font-size: 15px !important; line-height: 1.6 !important;
+    color: var(--a4-text-primary);
+    white-space: pre-line;
+  }
+
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-pills { display: flex !important; flex-wrap: wrap; gap: 6px !important; }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-pill {
+    display: inline-block;
+    padding: 5px 16px !important; border-radius: 999px;
+    background: #f0e9d8; color: #5a4530;
+    font-size: 12.5px !important; font-weight: 600 !important;
+    line-height: 1.4 !important;
+  }
+
+  .a4s-socials { display: flex; gap: 10px; flex-wrap: wrap; }
+  .a4s-social {
+    width: 38px; height: 38px; border-radius: 50%;
+    background: #f5f0e8; color: #444;
+    display: inline-flex; align-items: center; justify-content: center;
+    text-decoration: none;
+    transition: all 0.15s;
+  }
+  .a4s-social:hover { background: var(--a4-purple); color: #fff; transform: translateY(-2px); }
+  .a4s-social svg { width: 18px; height: 18px; }
+
+  .a4s-link {
+    display: inline-flex; align-items: center; gap: 8px;
+    color: var(--a4-purple); text-decoration: none;
+    font-weight: 600; font-size: 14.5px;
+    word-break: break-all;
+  }
+  .a4s-link:hover { color: var(--a4-purple-dark); text-decoration: underline; }
+
+  .a4s-session-item {
+    padding: 12px 14px;
+    border-top: 1px solid var(--a4-border-light);
+    border-radius: 8px;
+    transition: background 0.15s, box-shadow 0.15s, transform 0.15s;
+    position: relative;
+  }
+  .a4s-session-item:first-child { border-top: none; }
+  .a4s-session-item[data-session-id]:hover {
+    background: #f5ecdc;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    transform: translateY(-1px);
+    border-top-color: transparent;
+  }
+  .a4s-session-item[data-session-id]:hover + .a4s-session-item { border-top-color: transparent; }
+  .a4s-session-item[data-session-id]::after {
+    content: "";
+    position: absolute;
+    right: 14px; top: 50%;
+    width: 8px; height: 8px;
+    border-right: 2px solid var(--a4-text-muted);
+    border-top: 2px solid var(--a4-text-muted);
+    transform: translateY(-50%) rotate(45deg);
+    opacity: 0;
+    transition: opacity 0.15s, right 0.15s;
+  }
+  .a4s-session-item[data-session-id]:hover::after {
+    opacity: 1; right: 10px;
+    border-color: var(--a4-purple);
+  }
+  .a4s-session-item[data-session-id] .a4s-session-title,
+  .a4s-session-item[data-session-id] .a4s-session-meta { padding-right: 20px; }
+  .a4s-session-title {
+    font-weight: 700; font-size: 15px; color: var(--a4-text-primary);
+    margin-bottom: 4px;
+  }
+  .a4s-session-meta {
+    font-size: 13px; color: var(--a4-text-secondary);
+    display: flex; flex-wrap: wrap; gap: 12px;
+  }
+  .a4s-session-meta span { display: inline-flex; align-items: center; gap: 5px; }
+
+  .a4s-team { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .a4s-team-member {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px; background: #fafafa; border-radius: 10px;
+    cursor: pointer; transition: background 0.15s, box-shadow 0.15s, transform 0.15s;
+  }
+  .a4s-team-member:hover { background: #f5ecdc; box-shadow: 0 2px 8px rgba(0,0,0,0.06); transform: translateY(-1px); }
+  .a4s-team-member-photo {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: var(--a4-grad);
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 14px;
+    flex: 0 0 44px;
+    background-size: cover; background-position: center;
+  }
+  .a4s-team-member-info { min-width: 0; flex: 1; }
+  .a4s-team-member-name {
+    font-weight: 700; font-size: 14px; color: var(--a4-text-primary);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .a4s-team-member-title {
+    font-size: 12px; color: var(--a4-text-muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .a4s-team-member-arrow { color: var(--a4-text-muted); flex: 0 0 16px; opacity: 0.5; transition: opacity 0.15s, transform 0.15s; }
+  .a4s-team-member:hover .a4s-team-member-arrow { opacity: 1; transform: translateX(2px); color: var(--a4-purple); }
+
+  .a4s-loading-inline {
+    color: var(--a4-text-muted); font-size: 13px; font-style: italic;
+  }
+
+  /* ===== Bookmark button (modal head) ===== */
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-bookmark-btn {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 7px 14px; background: #fff;
+    border: 1.5px solid var(--a4-border-light); border-radius: 999px;
+    cursor: pointer;
+    font: 600 13px/1 'Lato', sans-serif; color: var(--a4-text-secondary);
+    transition: all 0.15s; margin-top: 10px;
+  }
+  .a4s-bookmark-btn svg { width: 14px; height: 14px; }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-bookmark-btn:hover { border-color: var(--a4-purple); color: var(--a4-purple); }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-bookmark-btn.is-bookmarked { background: var(--a4-purple); border-color: var(--a4-purple); color: #fff; }
+  .a4s-bookmark-btn.is-bookmarked svg { fill: currentColor; }
+
+  /* ===== Back button (in person view) ===== */
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-back-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: transparent; border: none;
+    color: var(--a4-text-secondary);
+    font: 600 13px/1 'Lato', sans-serif; cursor: pointer;
+    padding: 8px 12px; border-radius: 8px;
+    margin: 18px 18px 0;
+    transition: all 0.15s;
+  }
+  :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-back-btn:hover { background: #f5f0e8; color: var(--a4-purple); }
+
+  /* ===== Person profile view ===== */
+  .a4s-person-head {
+    padding: 4px 28px 22px;
+    text-align: center;
+    border-bottom: 1px solid var(--a4-border-light);
+  }
+  .a4s-person-photo {
+    width: 120px; height: 120px; border-radius: 50%;
+    margin: 0 auto 18px;
+    background: var(--a4-grad);
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 38px;
+    background-size: cover; background-position: center;
+    box-shadow: 0 6px 24px rgba(107,70,193,0.18);
+  }
+  .a4s-person-name {
+    margin: 0 0 6px; font-size: 26px; font-weight: 800;
+    letter-spacing: -0.01em; color: var(--a4-text-primary);
+  }
+  .a4s-person-title { font-size: 15px; color: var(--a4-text-secondary); margin: 0; }
+  .a4s-person-org { font-size: 15px; color: var(--a4-text-secondary); margin: 2px 0 0; }
+
+  /* ===== "Is member of" sponsor row in person view ===== */
+  .a4s-org-row {
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 12px; background: #fafafa; border-radius: 10px;
+    cursor: pointer; transition: background 0.15s;
+  }
+  .a4s-org-row:hover { background: #f5ecdc; }
+  .a4s-org-logo {
+    flex: 0 0 80px; width: 80px; height: 50px;
+    background: #fff; border: 1px solid var(--a4-border-light);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 6px;
+  }
+  .a4s-org-logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  .a4s-org-info { flex: 1; min-width: 0; }
+  .a4s-org-name { font-weight: 700; font-size: 15px; color: var(--a4-text-primary); }
+  .a4s-org-meta { font-size: 13px; color: var(--a4-text-secondary); margin-top: 2px; }
+
+  /* ===== Session view ===== */
+  .a4s-session-banner {
+    padding: 36px 28px 28px;
+    background: linear-gradient(135deg, #f5ecdc 0%, #efe5d0 100%);
+    border-radius: 18px 18px 0 0;
+    position: relative; overflow: hidden;
+    text-align: center;
+  }
+  .a4s-session-banner::before {
+    content: ""; position: absolute; inset: 0;
+    background-image:
+      radial-gradient(circle at 18% 28%, rgba(107,70,193,0.08) 2px, transparent 3px),
+      radial-gradient(circle at 78% 22%, rgba(212,165,116,0.12) 2px, transparent 3px),
+      radial-gradient(circle at 35% 78%, rgba(212,165,116,0.10) 1.5px, transparent 2.5px),
+      radial-gradient(circle at 85% 70%, rgba(107,70,193,0.06) 2.5px, transparent 3.5px);
+    opacity: 0.7;
+    pointer-events: none;
+  }
+  .a4s-session-banner > * { position: relative; }
+  .a4s-session-banner-format {
+    display: inline-block;
+    font-size: 11px; font-weight: 800;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--a4-purple);
+    padding: 4px 12px;
+    background: #fff; border-radius: 999px;
+    margin-bottom: 14px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  }
+  .a4s-session-banner h2 {
+    margin: 0 0 8px; font-size: 28px; font-weight: 800;
+    letter-spacing: -0.015em; color: var(--a4-text-primary);
+    line-height: 1.2;
+  }
+  .a4s-session-banner-when { font-size: 14px; color: var(--a4-text-secondary); }
+  .a4s-session-meta-row {
+    display: grid; gap: 10px;
+    padding: 18px 28px;
+    background: #fafafa;
+    border-bottom: 1px solid var(--a4-border-light);
+    grid-template-columns: 1fr 1fr;
+  }
+  .a4s-session-meta-item {
+    display: flex; gap: 10px;
+    font-size: 14px; color: var(--a4-text-primary);
+  }
+  .a4s-session-meta-item-icon {
+    flex: 0 0 18px; color: var(--a4-text-muted);
+    padding-top: 2px;
+  }
+  .a4s-session-meta-item-label {
+    font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--a4-text-muted); margin-bottom: 2px;
+  }
+
+  /* ===== Responsive ===== */
+  @media (max-width: 720px) {
+    .a4s-modal-head { flex-direction: column; gap: 14px; }
+    .a4s-modal-logo { width: 100%; max-width: 200px; }
+    .a4s-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+    .a4s-filters { padding: 12px; }
+    .a4s-session-meta-row { grid-template-columns: 1fr; }
+    .a4s-session-banner h2 { font-size: 22px; }
+  }
+</style>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+<div class="a4s-wrap">
+  <div class="a4s-filters" id="a4s-filters">
+    <div class="a4s-search">
+      <input class="a4s-search-input" id="a4s-search-input" type="search" placeholder="Search sponsors…" autocomplete="off" />
+    </div>
+    <div class="a4s-filter-slot" id="a4s-filter-slot"></div>
+    <button class="a4s-clear-btn" id="a4s-clear-btn" type="button">Clear filters</button>
+  </div>
+  <div class="a4s-content" id="a4s-content">
+    <div class="a4s-grid">
+      <div class="a4s-skeleton"></div><div class="a4s-skeleton"></div><div class="a4s-skeleton"></div>
+      <div class="a4s-skeleton"></div><div class="a4s-skeleton"></div><div class="a4s-skeleton"></div>
+      <div class="a4s-skeleton"></div><div class="a4s-skeleton"></div>
+    </div>
+  </div>
+</div>
+
+<div class="a4s-modal-backdrop" id="a4s-modal-backdrop" role="dialog" aria-modal="true">
+  <div class="a4s-modal" id="a4s-modal" role="document"></div>
+</div>
+
+<script>
+(function() {
+  // ────────────────────────────────────────────────────────────
+  // INSTANCE SCOPING — each pasted copy of this widget claims its
+  // own root element and namespaces all DOM access to it, so you
+  // can host multiple instances on one page (e.g. one per event).
+  // ────────────────────────────────────────────────────────────
+  const SELF_SCRIPT = document.currentScript;
+  let ROOT = null;
+  if (SELF_SCRIPT) {
+    // Walk back through previous siblings to find our root (the .ai4-sponsors-scope
+    // div that lives right above this script tag in the same pasted HTML blob).
+    let el = SELF_SCRIPT.previousElementSibling;
+    while (el) {
+      if (el.classList && el.classList.contains("ai4-sponsors-scope") && !el.hasAttribute("data-ai4-initialized")) {
+        ROOT = el;
+        break;
+      }
+      el = el.previousElementSibling;
+    }
+  }
+  // Fallback for hosts where currentScript isn't available: claim first un-initialized root.
+  if (!ROOT) {
+    ROOT = document.querySelector(".ai4-sponsors-scope:not([data-ai4-initialized])");
+  }
+  if (!ROOT) return;  // Nothing to bind to.
+  ROOT.setAttribute("data-ai4-initialized", "");
+
+  // All DOM lookups go through these scoped helpers — never document.getElementById.
+  const $ = (sel) => ROOT.querySelector(sel);
+  const $$ = (sel) => ROOT.querySelectorAll(sel);
+
+  // ────────────────────────────────────────────────────────────
+  // CONFIGURATION — change WORKER_URL after deploying the worker
+  // ────────────────────────────────────────────────────────────
+  const WORKER_URL = ROOT.getAttribute("data-worker-url")
+    || window.AI4_SPONSORS_WORKER_URL
+    || "https://ai4-sponsors.YOUR-SUBDOMAIN.workers.dev";
+
+  // Tier ordering — sponsors are grouped by tier name and sections render in this order.
+  // Lowercase compare. Tiers not listed fall after these in alpha order.
+  const TIER_ORDER = [
+    "diamond", "platinum", "gold", "silver", "bronze",
+    "founding", "headline", "presenting", "premier", "partner", "exhibitor"
+  ];
+
+  // Swapcard groups use machine names like "tier-1", "tier-2". Map them to display labels.
+  // Anything not in this map falls through and renders with its raw name (e.g. "Exhibitors").
+  const TIER_LABEL = {
+    "tier-1": "Diamond",
+    "tier-2": "Platinum",
+    "tier-3": "Gold",
+    "tier-4": "Silver",
+    "tier-5": "Bronze",
+    "partner": "Partner",
+    "exhibitor": "Exhibitor",
+  };
+  function displayTier(name) {
+    if (!name) return name;
+    return TIER_LABEL[String(name).toLowerCase().trim()] || name;
+  }
+
+  // The real tier lives in a custom field "Sponsor Level" — the Swapcard `group`
+  // field is "Exhibitors" for everyone. Read the custom field first, fall back
+  // to the group name only if the field isn't present.
+  function getSponsorTier(s) {
+    const cf = s.customFields?.["Sponsor Level"];
+    if (cf) {
+      if (cf.type === "multiselect") return (cf.values && cf.values[0]) || null;
+      return cf.value || null;
+    }
+    return s.sponsorLevel?.name || null;
+  }
+
+  // Custom field values from Swapcard come through as kebab-case slugs
+  // (e.g. "ai-software-ml-ops-platform"). Turn them into proper-case display
+  // strings with acronyms uppercased.
+  const ACRONYM_MAP = {
+    "ai": "AI", "it": "IT", "bi": "BI", "ml": "ML", "llm": "LLM", "nlp": "NLP",
+    "api": "API", "sdk": "SDK", "iot": "IoT", "ui": "UI", "ux": "UX",
+    "ar": "AR", "vr": "VR", "qa": "QA", "rpa": "RPA", "saas": "SaaS",
+    "gpu": "GPU", "gpus": "GPUs", "cpu": "CPU", "cpus": "CPUs",
+    "ci": "CI", "cd": "CD",
+  };
+  const LOWERCASE_WORDS = new Set(["and", "or", "of", "the", "to", "for", "in", "on", "at", "by", "with", "a", "an"]);
+  function prettifyValue(s) {
+    if (!s || typeof s !== "string") return s;
+    // Only transform pure kebab-case slugs (lowercase, digits, hyphens).
+    // Anything else is assumed already display-ready.
+    if (!/^[a-z0-9-]+$/.test(s)) return s;
+    return s.split("-").map((word, i) => {
+      if (ACRONYM_MAP[word]) return ACRONYM_MAP[word];
+      if (i > 0 && LOWERCASE_WORDS.has(word)) return word;
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    }).join(" ");
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // STATE
+  // ────────────────────────────────────────────────────────────
+  let DATA = null;
+  let FILTER_DEFS = [];        // [{ name, optionsValues:[] }] derived dynamically
+  const filterState = {
+    search: "",
+    selections: {},            // { "Sponsor Level": Set(["Diamond"]), "Product Types": Set([...]) }
+  };
+  const sessionsCache = new Map();
+
+  // Captured at init() time; modal backdrop is moved out of ROOT, so we hold a ref.
+  let BACKDROP = null;
+  let MODAL = null;
+
+  // ────────────────────────────────────────────────────────────
+  // BOOT
+  // ────────────────────────────────────────────────────────────
+  init().catch((err) => {
+    console.error(err);
+    const content = $(".a4s-content");
+    if (content) content.innerHTML =
+      `<div class="a4s-error">Couldn’t load sponsors. ${escapeHtml(err.message || String(err))}</div>`;
+  });
+
+  async function init() {
+    // Reparent the modal backdrop to document.body so that no ancestor transform/
+    // filter on the theme can break our position:fixed centering. We wrap it in
+    // a portal div that carries the same `.ai4-sponsors-scope` marker so every
+    // scoped CSS selector keeps working at the new location.
+    BACKDROP = $(".a4s-modal-backdrop");
+    MODAL = BACKDROP ? BACKDROP.querySelector(".a4s-modal") : null;
+    if (BACKDROP && !BACKDROP.closest(".ai4-sponsors-portal")) {
+      const portal = document.createElement("div");
+      portal.className = "ai4-sponsors-scope ai4-sponsors-portal";
+      portal.appendChild(BACKDROP);
+      document.body.appendChild(portal);
+    }
+
+    const res = await fetch(`${WORKER_URL}/sponsors`, { credentials: "omit" });
+    if (!res.ok) throw new Error(`Worker returned ${res.status}`);
+    DATA = await res.json();
+
+    // Filter to sponsors marked for public listing.
+    // Looks for a custom field whose name contains "public list" and checks for a Yes-ish value.
+    // If the field isn't present at all, fail open (show everyone) — this lets us survive a field
+    // rename without an outage.
+    const PUBLIC_FIELD = findPublicListFieldName(DATA);
+    if (PUBLIC_FIELD) {
+      DATA.sponsors = DATA.sponsors.filter((s) => {
+        const f = s.customFields?.[PUBLIC_FIELD];
+        if (!f) return false;
+        const vals = f.type === "multiselect" ? (f.values || []) : (f.value ? [f.value] : []);
+        return vals.some((v) => /^(yes|true|public)$/i.test(String(v).trim()));
+      });
+    }
+
+    // Temporary booth-hiding flag — when set on the root div, all sponsors
+    // show "-" instead of their assigned booth number. Useful for the period
+    // between sponsor signup and the booth-assignment deadline. Remove the
+    // attribute on the root div to restore real booth numbers.
+    if (ROOT.hasAttribute("data-hide-booths")) {
+      for (const s of DATA.sponsors) {
+        s.booths = ["-"];
+      }
+    }
+
+    buildFilterDefs();
+    renderFilters();
+    render();
+    wireGlobalEvents();
+  }
+
+  function findPublicListFieldName(data) {
+    const fdNames = (data.fieldDefinitions || []).map((d) => d.name).filter(Boolean);
+    // Prefer an exact-ish match; fall back to any field whose name contains "public list".
+    return fdNames.find((n) => /include.*public.*list/i.test(n))
+        || fdNames.find((n) => /public.*list/i.test(n))
+        || null;
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // FILTER DEFINITIONS — sponsor level (group) + multiselect custom fields
+  // ────────────────────────────────────────────────────────────
+  function buildFilterDefs() {
+    const defs = [];
+
+    // 1) Sponsor Level — synthesized from the per-event group on each sponsor
+    const tierSet = new Map(); // name -> count
+    for (const s of DATA.sponsors) {
+      const t = s.sponsorLevel?.name;
+      if (!t) continue;
+      tierSet.set(t, (tierSet.get(t) || 0) + 1);
+    }
+    if (tierSet.size > 1) {
+      defs.push({
+        name: "Sponsor Level",
+        kind: "tier",
+        options: [...tierSet.keys()].map((v) => ({ value: v, count: tierSet.get(v) })),
+      });
+    }
+
+    // 2) Multi-select custom fields (Product Types, etc.)
+    for (const fd of DATA.fieldDefinitions || []) {
+      if (fd.type !== "MultipleSelectFieldDefinition" && fd.type !== "SelectFieldDefinition") continue;
+      // Skip the "Include in public list" field — it's used for gating, not filtering.
+      if (/include.*public.*list|public.*list/i.test(fd.name)) continue;
+      // Count usage so we can skip empty fields
+      const counts = new Map();
+      for (const s of DATA.sponsors) {
+        const cf = s.customFields[fd.name];
+        if (!cf) continue;
+        const vals = cf.type === "multiselect" ? cf.values : (cf.value ? [cf.value] : []);
+        for (const v of vals) counts.set(v, (counts.get(v) || 0) + 1);
+      }
+      if (counts.size === 0) continue; // no values present, hide
+      const isLevelFilter = fd.name === "Sponsor Level";
+      const optionSorter = isLevelFilter
+        ? tierSorter
+        : (a, b) => prettifyValue(a).localeCompare(prettifyValue(b));
+      defs.push({
+        name: fd.name,
+        kind: "custom",
+        definitionId: fd.id,
+        options: [...counts.keys()]
+          .sort(optionSorter)
+          .map((v) => ({ value: v, count: counts.get(v) })),
+      });
+    }
+
+    FILTER_DEFS = defs;
+    for (const d of defs) filterState.selections[d.name] = new Set();
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // FILTER UI
+  // ────────────────────────────────────────────────────────────
+  function renderFilters() {
+    const slot = $(".a4s-filter-slot");
+    slot.innerHTML = FILTER_DEFS.map((d) => {
+      const optsHtml = d.options.map((o) => {
+        const isLevelFilter = d.kind === "tier" || d.name === "Sponsor Level";
+        const label = isLevelFilter ? displayTier(o.value) : prettifyValue(o.value);
+        return `
+        <label>
+          <input type="checkbox" data-filter="${escapeAttr(d.name)}" value="${escapeAttr(o.value)}" />
+          <span>${escapeHtml(label)}</span>
+        </label>`;
+      }).join("");
+      return `
+        <div class="a4s-filter-select" data-name="${escapeAttr(d.name)}">
+          <button type="button" class="a4s-filter-btn">${escapeHtml(d.name)}<span class="a4s-count-badge" style="display:none">0</span></button>
+          <div class="a4s-dropdown">${optsHtml}</div>
+        </div>`;
+    }).join("");
+
+    // Wire dropdown toggles
+    slot.querySelectorAll(".a4s-filter-select").forEach((wrap) => {
+      const btn = wrap.querySelector(".a4s-filter-btn");
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const wasOpen = wrap.classList.contains("open");
+        slot.querySelectorAll(".a4s-filter-select.open").forEach((w) => w.classList.remove("open"));
+        if (!wasOpen) wrap.classList.add("open");
+      });
+    });
+
+    // Wire checkbox changes
+    slot.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+      cb.addEventListener("change", () => {
+        const name = cb.getAttribute("data-filter");
+        const set = filterState.selections[name];
+        if (cb.checked) set.add(cb.value); else set.delete(cb.value);
+        updateFilterBadges();
+        render();
+      });
+    });
+
+    $(".a4s-search-input").addEventListener("input", (e) => {
+      filterState.search = e.target.value.toLowerCase().trim();
+      render();
+    });
+    $(".a4s-clear-btn").addEventListener("click", clearAllFilters);
+  }
+
+  function updateFilterBadges() {
+    $$(".a4s-filter-select").forEach((wrap) => {
+      const name = wrap.getAttribute("data-name");
+      const count = filterState.selections[name]?.size || 0;
+      const badge = wrap.querySelector(".a4s-count-badge");
+      if (count > 0) { badge.textContent = count; badge.style.display = "inline-block"; }
+      else { badge.style.display = "none"; }
+    });
+  }
+
+  function clearAllFilters() {
+    filterState.search = "";
+    $(".a4s-search-input").value = "";
+    for (const k of Object.keys(filterState.selections)) filterState.selections[k].clear();
+    $$('.a4s-filter-slot input[type="checkbox"]').forEach((cb) => (cb.checked = false));
+    updateFilterBadges();
+    render();
+  }
+
+  function wireGlobalEvents() {
+    // Click outside any open dropdown closes THIS instance's dropdowns.
+    document.addEventListener("click", () => {
+      $$(".a4s-filter-select.open").forEach((w) => w.classList.remove("open"));
+    });
+
+    // Escape closes the modal — but only if this instance's modal is open,
+    // so two instances don't both fire close on the same key press.
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && BACKDROP && BACKDROP.classList.contains("open")) {
+        closeModal();
+      }
+    });
+
+    // Backdrop click — comparing to BACKDROP directly (not via id) so multiple
+    // instances each handle their own modal correctly.
+    if (BACKDROP) {
+      BACKDROP.addEventListener("click", (e) => {
+        if (e.target === BACKDROP) closeModal();
+      });
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // FILTERING
+  // ────────────────────────────────────────────────────────────
+  function applyFilters(list) {
+    const q = filterState.search;
+    return list.filter((s) => {
+      // Search
+      if (q) {
+        const hay = [s.name, s.description, ...(s.booths || []), s.sponsorLevel?.name || ""]
+          .join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      // Filters: AND across filters, OR within
+      for (const def of FILTER_DEFS) {
+        const sel = filterState.selections[def.name];
+        if (!sel || sel.size === 0) continue;
+        let values = [];
+        if (def.kind === "tier") {
+          const t = getSponsorTier(s);
+          if (t) values = [t];
+        } else {
+          const cf = s.customFields[def.name];
+          if (cf) values = cf.type === "multiselect" ? cf.values : (cf.value ? [cf.value] : []);
+        }
+        const match = values.some((v) => sel.has(v));
+        if (!match) return false;
+      }
+      return true;
+    });
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // RENDER GRID (grouped by tier)
+  // ────────────────────────────────────────────────────────────
+  function render() {
+    const filtered = applyFilters(DATA.sponsors);
+
+    const content = $(".a4s-content");
+    if (filtered.length === 0) {
+      content.innerHTML = `<div class="a4s-empty">No sponsors match these filters.</div>`;
+      return;
+    }
+
+    // Group by tier name
+    const byTier = new Map();
+    const noTier = [];
+    for (const s of filtered) {
+      const t = getSponsorTier(s);
+      if (t) {
+        if (!byTier.has(t)) byTier.set(t, []);
+        byTier.get(t).push(s);
+      } else {
+        noTier.push(s);
+      }
+    }
+    const tierOrder = [...byTier.keys()].sort(tierSorter);
+
+    let html = "";
+    for (const tier of tierOrder) {
+      const list = byTier.get(tier).sort((a, b) => a.name.localeCompare(b.name));
+      html += renderTierSection(tier, list);
+    }
+    if (noTier.length) {
+      html += renderTierSection("Other", noTier.sort((a, b) => a.name.localeCompare(b.name)));
+    }
+    content.innerHTML = html;
+
+    // Wire card clicks
+    content.querySelectorAll(".a4s-card").forEach((el) => {
+      const id = el.getAttribute("data-id");
+      el.addEventListener("click", () => openModal(id));
+      el.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openModal(id); }
+      });
+    });
+  }
+
+  function tierRank(name) {
+    // Match against the displayable label so "tier-1" gets ranked as "Diamond".
+    const n = displayTier(name).toLowerCase();
+    for (let i = 0; i < TIER_ORDER.length; i++) {
+      if (n.includes(TIER_ORDER[i])) return i;
+    }
+    return -1;
+  }
+  function tierSorter(a, b) {
+    const ai = tierRank(a);
+    const bi = tierRank(b);
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1;
+    if (bi !== -1) return 1;
+    return a.localeCompare(b);
+  }
+
+  function renderTierSection(tier, list) {
+    return `
+      <section class="a4s-tier-section">
+        <header class="a4s-tier-header">
+          <h2 class="a4s-tier-name">${escapeHtml(displayTier(tier))}</h2>
+        </header>
+        <div class="a4s-grid">
+          ${list.map(renderCard).join("")}
+        </div>
+      </section>`;
+  }
+
+  function renderCard(s) {
+    const booth = (s.booths && s.booths[0]) ? s.booths[0] : "";
+    const logoSection = s.logoUrl
+      ? `<div class="a4s-card-logo"><img src="${escapeAttr(s.logoUrl)}" alt="${escapeAttr(s.name)} logo" loading="lazy" onerror="this.parentElement.classList.add('is-empty');this.remove();this.parentElement.textContent='${escapeAttr(s.name).slice(0,40)}';"/></div>`
+      : `<div class="a4s-card-logo is-empty">${escapeHtml(s.name)}</div>`;
+    const meta = booth
+      ? `<span class="a4s-booth-prefix">Booth</span>${escapeHtml(booth)}`
+      : `<span class="a4s-booth-prefix">&nbsp;</span><span style="color:var(--a4-text-muted);">—</span>`;
+    return `
+      <article class="a4s-card" data-id="${escapeAttr(s.id)}" tabindex="0" role="button" aria-label="${escapeAttr(s.name)}">
+        ${logoSection}
+        <div class="a4s-card-meta">${meta}</div>
+      </article>`;
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // MODAL
+  // ────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────
+  // VIEW STACK — modal can show "sponsor" or "person"
+  // ────────────────────────────────────────────────────────────
+  let viewStack = [];
+  const personFetchCache = new Map(); // personId -> { person, sessions }
+
+  function openModal(id) {
+    viewStack = [{ type: "sponsor", id }];
+    BACKDROP.classList.add("open");
+    document.body.style.overflow = "hidden";
+    renderCurrentView();
+  }
+  function openPerson(personId, fromSponsorId) {
+    viewStack.push({ type: "person", id: personId, fromSponsorId });
+    renderCurrentView();
+    MODAL.scrollTop = 0;
+  }
+  function openSession(sessionId, fromSponsorId) {
+    viewStack.push({ type: "session", id: sessionId, fromSponsorId });
+    renderCurrentView();
+    MODAL.scrollTop = 0;
+  }
+  function goBack() {
+    viewStack.pop();
+    if (viewStack.length === 0) closeModal();
+    else renderCurrentView();
+  }
+  function closeModal() {
+    BACKDROP.classList.remove("open");
+    document.body.style.overflow = "";
+    viewStack = [];
+  }
+  function renderCurrentView() {
+    const view = viewStack[viewStack.length - 1];
+    const modal = MODAL;
+    if (view.type === "sponsor") {
+      const s = DATA.sponsors.find((x) => x.id === view.id);
+      modal.innerHTML = renderSponsorView(s);
+      modal.querySelector(".a4s-modal-close").addEventListener("click", closeModal);
+      modal.querySelector(".a4s-bookmark-btn")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleBookmark("sponsor", s.id);
+        renderCurrentView();
+      });
+      modal.querySelectorAll(".a4s-team-member").forEach((el) => {
+        el.addEventListener("click", () => openPerson(el.getAttribute("data-person-id"), s.id));
+      });
+      fetchAndRenderSessions(s.id);
+    } else if (view.type === "person") {
+      const fromSponsor = DATA.sponsors.find((x) => x.id === view.fromSponsorId);
+      const person = (fromSponsor?.team || []).find((m) => m.id === view.id);
+      modal.innerHTML = renderPersonView(person, fromSponsor);
+      modal.querySelector(".a4s-modal-close").addEventListener("click", closeModal);
+      modal.querySelector(".a4s-back-btn")?.addEventListener("click", goBack);
+      modal.querySelector(".a4s-org-row")?.addEventListener("click", () => goBack());
+      modal.querySelector(".a4s-bookmark-btn")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleBookmark("person", person.id);
+        renderCurrentView();
+      });
+      fetchAndRenderPersonSessions(person.id, fromSponsor?.id);
+    } else if (view.type === "session") {
+      modal.innerHTML = renderSessionView(view.id, view.fromSponsorId);
+      modal.querySelector(".a4s-modal-close").addEventListener("click", closeModal);
+      modal.querySelector(".a4s-back-btn")?.addEventListener("click", goBack);
+      modal.querySelectorAll(".a4s-org-row[data-sponsor-id]").forEach((el) => {
+        el.addEventListener("click", () => {
+          const sid = el.getAttribute("data-sponsor-id");
+          // Replace current session view with sponsor view (don't stack endlessly)
+          viewStack[viewStack.length - 1] = { type: "sponsor", id: sid };
+          renderCurrentView();
+          MODAL.scrollTop = 0;
+        });
+      });
+      modal.querySelector(".a4s-bookmark-btn")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleBookmark("session", view.id);
+        renderCurrentView();
+      });
+      // Session view uses live data via fetchAndRenderSessionDetail
+      fetchAndRenderSessionDetail(view.id, view.fromSponsorId);
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // BOOKMARKS — localStorage persistence
+  // ────────────────────────────────────────────────────────────
+  const BOOKMARK_KEY = "ai4_sponsors_bookmarks_v1";
+  function getBookmarks() {
+    try { return JSON.parse(localStorage.getItem(BOOKMARK_KEY) || '{"sponsor":[],"person":[]}'); }
+    catch { return { sponsor: [], person: [] }; }
+  }
+  function isBookmarked(type, id) { return getBookmarks()[type]?.includes(id); }
+  function toggleBookmark(type, id) {
+    const all = getBookmarks();
+    const list = all[type] || [];
+    const i = list.indexOf(id);
+    if (i === -1) list.push(id); else list.splice(i, 1);
+    all[type] = list;
+    localStorage.setItem(BOOKMARK_KEY, JSON.stringify(all));
+  }
+  function bookmarkBtnHtml(type, id) {
+    const on = isBookmarked(type, id);
+    const svg = on
+      ? `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 3a2 2 0 0 0-2 2v16l9-4 9 4V5a2 2 0 0 0-2-2H5z"/></svg>`
+      : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>`;
+    return `<button class="a4s-bookmark-btn ${on ? "is-bookmarked" : ""}" data-type="${type}" data-id="${escapeAttr(id)}">${svg}<span>${on ? "Bookmarked" : "Bookmark"}</span></button>`;
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // SPONSOR VIEW
+  // ────────────────────────────────────────────────────────────
+  function renderSponsorView(s) {
+    const tier = getSponsorTier(s);
+    const productTypes = s.customFields["Product Types"]?.values
+      || s.customFields["Product Type"]?.values
+      || [];
+    const otherCustomMS = Object.entries(s.customFields)
+      .filter(([k, v]) => v.type === "multiselect" && k !== "Product Types" && k !== "Product Type" && (v.values || []).length);
+    const desc = (s.description || "").trim();
+    const booths = s.booths || [];
+
+    return `
+      <button class="a4s-modal-close" aria-label="Close">×</button>
+      <div class="a4s-modal-head">
+        <div class="a4s-modal-logo">
+          ${s.logoUrl
+            ? `<img src="${escapeAttr(s.logoUrl)}" alt="${escapeAttr(s.name)} logo" />`
+            : `<span style="color:#888;font-weight:700;">${escapeHtml(s.name).slice(0, 24)}</span>`}
+        </div>
+        <div class="a4s-modal-head-text">
+          ${tier ? `<div class="a4s-modal-tier">${escapeHtml(displayTier(tier))}</div>` : ""}
+          <h2>${escapeHtml(s.name)}</h2>
+          ${booths.map((b) => `<div class="a4s-modal-booth">Booth ${escapeHtml(b)}</div>`).join("")}
+          ${bookmarkBtnHtml("sponsor", s.id)}
+        </div>
+      </div>
+      <div class="a4s-modal-body">
+        ${desc ? `<div class="a4s-modal-section"><h3>Information</h3><p>${escapeHtml(desc)}</p></div>` : ""}
+        ${productTypes.length ? `<div class="a4s-modal-section"><h3>Product Types</h3><div class="a4s-pills">${productTypes.map((t) => `<span class="a4s-pill">${escapeHtml(prettifyValue(t))}</span>`).join("")}</div></div>` : ""}
+        ${otherCustomMS.map(([k, v]) => `<div class="a4s-modal-section"><h3>${escapeHtml(k)}</h3><div class="a4s-pills">${v.values.map((x) => `<span class="a4s-pill">${escapeHtml(prettifyValue(x))}</span>`).join("")}</div></div>`).join("")}
+        ${s.socials.length ? `<div class="a4s-modal-section"><h3>Social Media</h3><div class="a4s-socials">${s.socials.map(renderSocialIcon).join("")}</div></div>` : ""}
+        ${s.websiteUrl ? `<div class="a4s-modal-section"><h3>Contact details</h3><a class="a4s-link" href="${escapeAttr(s.websiteUrl)}" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg>${escapeHtml(s.websiteUrl)}</a></div>` : ""}
+        <div class="a4s-modal-section a4s-modal-sessions"></div>
+        ${s.team.length ? `<div class="a4s-modal-section"><h3>Team</h3><div class="a4s-team">${s.team.map(renderTeamMember).join("")}</div></div>` : ""}
+      </div>`;
+  }
+
+  function renderTeamMember(m) {
+    const initials = ((m.firstName?.[0] || "") + (m.lastName?.[0] || "")).toUpperCase() || "?";
+    const photo = m.photoUrl
+      ? `<div class="a4s-team-member-photo" style="background-image:url('${escapeAttr(m.photoUrl)}')"></div>`
+      : `<div class="a4s-team-member-photo">${escapeHtml(initials)}</div>`;
+    return `
+      <div class="a4s-team-member" data-person-id="${escapeAttr(m.id)}" tabindex="0" role="button" aria-label="View ${escapeAttr(m.fullName)} profile">
+        ${photo}
+        <div class="a4s-team-member-info">
+          <div class="a4s-team-member-name">${escapeHtml(m.fullName)}</div>
+          <div class="a4s-team-member-title">${escapeHtml(m.jobTitle || "")}</div>
+        </div>
+        <svg class="a4s-team-member-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+      </div>`;
+  }
+
+  function renderSessionItem(sess, fromSponsorId) {
+    const cospeakers = (sess.speakerNames && sess.speakerNames.length)
+      ? `<span>👥 ${sess.speakerNames.map(escapeHtml).join(", ")}</span>`
+      : "";
+    return `
+      <div class="a4s-session-item" data-session-id="${escapeAttr(sess.id)}" ${fromSponsorId ? `data-from-sponsor="${escapeAttr(fromSponsorId)}"` : ""} tabindex="0" role="button" style="cursor:pointer;">
+        <div class="a4s-session-title">${escapeHtml(sess.title || "Untitled session")}</div>
+        <div class="a4s-session-meta">
+          ${sess.beginsAt ? `<span>🕒 ${formatTimeRange(sess.beginsAt, sess.endsAt)}</span>` : ""}
+          ${sess.place ? `<span>📍 ${escapeHtml(sess.place)}</span>` : ""}
+          ${cospeakers}
+        </div>
+      </div>`;
+  }
+
+  function wireSessionItemClicks(slot, fromSponsorId) {
+    slot.querySelectorAll(".a4s-session-item[data-session-id]").forEach((el) => {
+      const sid = el.getAttribute("data-session-id");
+      el.addEventListener("click", () => openSession(sid, fromSponsorId));
+      el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openSession(sid, fromSponsorId); } });
+    });
+  }
+
+  async function fetchAndRenderSessions(exhibitorId) {
+    const slot = MODAL && MODAL.querySelector(".a4s-modal-sessions");
+    if (!slot) return;
+    slot.innerHTML = `<h3>Sessions</h3><div class="a4s-loading-inline">Loading sessions…</div>`;
+    try {
+      let sessions;
+      if (sessionsCache.has(exhibitorId)) sessions = sessionsCache.get(exhibitorId);
+      else {
+        const res = await fetch(`${WORKER_URL}/sessions?id=${encodeURIComponent(exhibitorId)}`);
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const data = await res.json();
+        sessions = data.sessions || [];
+        sessionsCache.set(exhibitorId, sessions);
+      }
+      if (sessions.length === 0) { slot.innerHTML = ""; return; }
+      slot.innerHTML = `<h3>Sessions</h3>${sessions.map((s) => renderSessionItem(s, exhibitorId)).join("")}`;
+      wireSessionItemClicks(slot, exhibitorId);
+    } catch (e) {
+      slot.innerHTML = `<h3>Sessions</h3><div class="a4s-loading-inline">Couldn't load sessions.</div>`;
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // PERSON PROFILE VIEW
+  // ────────────────────────────────────────────────────────────
+  function renderPersonView(p, fromSponsor) {
+    const initials = ((p.firstName?.[0] || "") + (p.lastName?.[0] || "")).toUpperCase() || "?";
+    const photo = p.photoUrl
+      ? `<div class="a4s-person-photo" style="background-image:url('${escapeAttr(p.photoUrl)}')"></div>`
+      : `<div class="a4s-person-photo">${escapeHtml(initials)}</div>`;
+
+    return `
+      <button class="a4s-modal-close" aria-label="Close">×</button>
+      <button class="a4s-back-btn" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+        Back to ${escapeHtml(fromSponsor?.name || "sponsor")}
+      </button>
+      <div class="a4s-person-head">
+        ${photo}
+        <h2 class="a4s-person-name">${escapeHtml(p.fullName)}</h2>
+        ${p.jobTitle ? `<p class="a4s-person-title">${escapeHtml(p.jobTitle)}</p>` : ""}
+        ${p.organization || fromSponsor ? `<p class="a4s-person-org">${escapeHtml(p.organization || fromSponsor?.name)}</p>` : ""}
+        ${bookmarkBtnHtml("person", p.id)}
+      </div>
+      <div class="a4s-modal-body">
+        ${p.biography ? `<div class="a4s-modal-section"><h3>About me</h3><p>${escapeHtml(p.biography)}</p></div>` : ""}
+        ${p.socials?.length ? `<div class="a4s-modal-section"><h3>Social media</h3><div class="a4s-socials">${p.socials.map(renderSocialIcon).join("")}</div></div>` : ""}
+        ${fromSponsor ? `
+          <div class="a4s-modal-section">
+            <h3>Is member of</h3>
+            <div class="a4s-org-row" tabindex="0" role="button">
+              <div class="a4s-org-logo">${fromSponsor.logoUrl ? `<img src="${escapeAttr(fromSponsor.logoUrl)}" alt="" />` : escapeHtml(fromSponsor.name)}</div>
+              <div class="a4s-org-info">
+                <div class="a4s-org-name">${escapeHtml(fromSponsor.name)}</div>
+                <div class="a4s-org-meta">${escapeHtml(displayTier(getSponsorTier(fromSponsor)) || "")}${(fromSponsor.booths || []).filter((b) => b && b !== "—").length ? ` · Booth ${escapeHtml((fromSponsor.booths || []).filter((b) => b && b !== "—")[0])}` : ""}</div>
+              </div>
+            </div>
+          </div>` : ""}
+        <div class="a4s-modal-section a4s-modal-person-sessions"></div>
+      </div>`;
+  }
+
+  async function fetchAndRenderPersonSessions(personId, fromSponsorId) {
+    const slot = MODAL && MODAL.querySelector(".a4s-modal-person-sessions");
+    if (!slot) return;
+    slot.innerHTML = `<h3>Is speaking at</h3><div class="a4s-loading-inline">Loading sessions…</div>`;
+    try {
+      // Reuse the cached sponsor sessions; filter by speakerNames matching this person.
+      let sponsorSessions;
+      if (sessionsCache.has(fromSponsorId)) sponsorSessions = sessionsCache.get(fromSponsorId);
+      else {
+        const res = await fetch(`${WORKER_URL}/sessions?id=${encodeURIComponent(fromSponsorId)}`);
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const data = await res.json();
+        sponsorSessions = data.sessions || [];
+        sessionsCache.set(fromSponsorId, sponsorSessions);
+      }
+      // Filter to ones where this person is a speaker (worker payload uses speakerIds OR speakerNames).
+      const fromSponsor = DATA.sponsors.find((s) => s.id === fromSponsorId);
+      const person = (fromSponsor?.team || []).find((m) => m.id === personId);
+      const matched = sponsorSessions.filter((sess) => {
+        if (sess.speakerIds && person?.userId) return sess.speakerIds.includes(person.userId);
+        if (sess.speakerNames && person?.fullName) return sess.speakerNames.some((n) => n.includes(person.fullName));
+        return false;
+      });
+      if (matched.length === 0) { slot.innerHTML = ""; return; }
+      slot.innerHTML = `<h3>Is speaking at</h3>${matched.map((s) => renderSessionItem(s, fromSponsorId)).join("")}`;
+      wireSessionItemClicks(slot, fromSponsorId);
+    } catch (e) {
+      slot.innerHTML = `<h3>Is speaking at</h3><div class="a4s-loading-inline">Couldn't load sessions.</div>`;
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // SESSION VIEW
+  // ────────────────────────────────────────────────────────────
+  function renderSessionView(sessionId, fromSponsorId, session) {
+    const fromSponsor = DATA.sponsors.find((s) => s.id === fromSponsorId);
+    if (!session) {
+      // Loading shell — fetchAndRenderSessionDetail will replace this once loaded.
+      return `
+        <button class="a4s-modal-close" aria-label="Close">×</button>
+        <button class="a4s-back-btn" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          Back to ${escapeHtml(fromSponsor?.name || "sponsor")}
+        </button>
+        <div class="a4s-modal-body a4s-session-body"><div class="a4s-loading-inline">Loading session…</div></div>`;
+    }
+    const dateStr = session.beginsAt
+      ? new Date(session.beginsAt).toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })
+      : "";
+    const timeStr = session.beginsAt && session.endsAt
+      ? `${new Date(session.beginsAt).toLocaleString("en-US", { hour: "numeric", minute: "2-digit" })} to ${new Date(session.endsAt).toLocaleString("en-US", { hour: "numeric", minute: "2-digit" })}`
+      : "";
+    const durationMin = session.beginsAt && session.endsAt
+      ? Math.round((new Date(session.endsAt) - new Date(session.beginsAt)) / 60000)
+      : 0;
+    const durationStr = durationMin >= 60 ? `${Math.floor(durationMin / 60)} hr.${durationMin % 60 ? ` ${durationMin % 60} min.` : ""}` : `${durationMin} min.`;
+
+    const linkedExhibitorIds = (session.exhibitorIds && session.exhibitorIds.length)
+      ? session.exhibitorIds
+      : (fromSponsorId ? [fromSponsorId] : []);
+    const linkedExhibitors = linkedExhibitorIds
+      .map((id) => DATA.sponsors.find((s) => s.id === id))
+      .filter(Boolean);
+
+    const customMS = Object.entries(session.customFields || {})
+      .filter(([k, v]) => v.type === "multiselect" && (v.values || []).length);
+
+    return `
+      <button class="a4s-modal-close" aria-label="Close">×</button>
+      <button class="a4s-back-btn" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+        Back to ${escapeHtml(fromSponsor?.name || "sponsor")}
+      </button>
+      <div class="a4s-session-banner">
+        ${session.format ? `<div class="a4s-session-banner-format">${escapeHtml(session.format)}</div>` : ""}
+        <h2>${escapeHtml(session.title)}</h2>
+        ${dateStr ? `<div class="a4s-session-banner-when">${escapeHtml(dateStr)}${timeStr ? ` at ${escapeHtml(timeStr)}` : ""}</div>` : ""}
+      </div>
+      <div class="a4s-session-meta-row">
+        ${session.beginsAt ? `
+          <div class="a4s-session-meta-item">
+            <svg class="a4s-session-meta-item-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <div>
+              <div class="a4s-session-meta-item-label">When</div>
+              <div>${escapeHtml(timeStr)} · ${escapeHtml(durationStr)}</div>
+            </div>
+          </div>` : ""}
+        ${session.place ? `
+          <div class="a4s-session-meta-item">
+            <svg class="a4s-session-meta-item-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+            <div>
+              <div class="a4s-session-meta-item-label">Where</div>
+              <div>${escapeHtml(session.place)}</div>
+            </div>
+          </div>` : ""}
+      </div>
+      <div class="a4s-modal-body">
+        <div style="display:flex; justify-content:flex-end; margin-bottom: 8px;">${bookmarkBtnHtml("session", session.id)}</div>
+        ${session.description ? `<div class="a4s-modal-section"><h3>Information</h3><p>${escapeHtml(session.description)}</p></div>` : ""}
+        ${customMS.map(([k, v]) => `<div class="a4s-modal-section"><h3>${escapeHtml(k)}</h3><div class="a4s-pills">${v.values.map((x) => `<span class="a4s-pill">${escapeHtml(prettifyValue(x))}</span>`).join("")}</div></div>`).join("")}
+        ${session.speakerNames?.length ? `<div class="a4s-modal-section"><h3>Speakers</h3><div class="a4s-pills">${session.speakerNames.map((n) => `<span class="a4s-pill">${escapeHtml(n)}</span>`).join("")}</div></div>` : ""}
+        ${linkedExhibitors.length ? `
+          <div class="a4s-modal-section">
+            <h3>${linkedExhibitors.length === 1 ? "Sponsored by" : "Sponsors"}</h3>
+            ${linkedExhibitors.map((sp) => `
+              <div class="a4s-org-row" data-sponsor-id="${escapeAttr(sp.id)}" tabindex="0" role="button" style="margin-bottom: 8px;">
+                <div class="a4s-org-logo">${sp.logoUrl ? `<img src="${escapeAttr(sp.logoUrl)}" alt="" />` : escapeHtml(sp.name)}</div>
+                <div class="a4s-org-info">
+                  <div class="a4s-org-name">${escapeHtml(sp.name)}</div>
+                  <div class="a4s-org-meta">${escapeHtml(displayTier(getSponsorTier(sp)) || "")}${(sp.booths || []).filter((b) => b && b !== "—").length ? ` · Booth ${escapeHtml((sp.booths || []).filter((b) => b && b !== "—")[0])}` : ""}</div>
+                </div>
+                <svg class="a4s-team-member-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex:0 0 16px;"><path d="m9 18 6-6-6-6"/></svg>
+              </div>`).join("")}
+          </div>` : ""}
+      </div>`;
+  }
+
+  async function fetchAndRenderSessionDetail(sessionId, fromSponsorId) {
+    // Find the session in the cached sponsor sessions; fetch if not cached.
+    let session = null;
+    try {
+      let sponsorSessions;
+      if (sessionsCache.has(fromSponsorId)) sponsorSessions = sessionsCache.get(fromSponsorId);
+      else {
+        const res = await fetch(`${WORKER_URL}/sessions?id=${encodeURIComponent(fromSponsorId)}`);
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const data = await res.json();
+        sponsorSessions = data.sessions || [];
+        sessionsCache.set(fromSponsorId, sponsorSessions);
+      }
+      session = sponsorSessions.find((s) => s.id === sessionId);
+    } catch (e) {
+      const body = MODAL && MODAL.querySelector(".a4s-session-body");
+      if (body) body.innerHTML = `<div class="a4s-loading-inline">Couldn't load session.</div>`;
+      return;
+    }
+    if (!session) {
+      const body = MODAL && MODAL.querySelector(".a4s-session-body");
+      if (body) body.innerHTML = `<div class="a4s-empty">Session not found.</div>`;
+      return;
+    }
+    // Replace the entire modal contents now that we have the session
+    const modal = MODAL;
+    modal.innerHTML = renderSessionView(sessionId, fromSponsorId, session);
+    modal.querySelector(".a4s-modal-close").addEventListener("click", closeModal);
+    modal.querySelector(".a4s-back-btn")?.addEventListener("click", goBack);
+    modal.querySelectorAll(".a4s-org-row[data-sponsor-id]").forEach((el) => {
+      el.addEventListener("click", () => {
+        const sid = el.getAttribute("data-sponsor-id");
+        viewStack[viewStack.length - 1] = { type: "sponsor", id: sid };
+        renderCurrentView();
+        MODAL.scrollTop = 0;
+      });
+    });
+    modal.querySelector(".a4s-bookmark-btn")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleBookmark("session", sessionId);
+      renderCurrentView();
+    });
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // SOCIAL ICONS (inline SVG, brand-agnostic)
+  // ────────────────────────────────────────────────────────────
+  function renderSocialIcon(s) {
+    const t = (s.type || "").toLowerCase();
+    const icons = {
+      twitter:   `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>`,
+      x:         `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>`,
+      facebook:  `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M22 12a10 10 0 1 0-11.563 9.876V14.89H7.898V12h2.539V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.196 2.238.196v2.46H15.19c-1.243 0-1.63.771-1.63 1.563V12h2.773l-.443 2.89h-2.33v6.987A10 10 0 0 0 22 12z"/></svg>`,
+      linkedin:  `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.852 3.37-1.852 3.601 0 4.267 2.37 4.267 5.455v6.288zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.063 2.063 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>`,
+      instagram: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/></svg>`,
+      youtube:   `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>`,
+    };
+    const svg = icons[t] || `<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>`;
+    return `<a class="a4s-social" href="${escapeAttr(s.url)}" target="_blank" rel="noopener" title="${escapeAttr(s.type)}">${svg}</a>`;
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // UTILS
+  // ────────────────────────────────────────────────────────────
+  function escapeHtml(s) {
+    return String(s ?? "").replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+  function escapeAttr(s) { return escapeHtml(s); }
+  function formatTimeRange(begins, ends) {
+    try {
+      const b = new Date(begins);
+      const e = ends ? new Date(ends) : null;
+      const opts = { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
+      const bs = b.toLocaleString("en-US", opts);
+      if (!e) return bs;
+      const es = e.toLocaleString("en-US", { hour: "numeric", minute: "2-digit" });
+      return `${bs} – ${es}`;
+    } catch { return ""; }
+  }
+})();
+</script>
+</div>

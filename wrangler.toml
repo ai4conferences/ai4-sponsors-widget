@@ -1,0 +1,20 @@
+name = "ai4-sponsors"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+# Set the API key (does not go in this file):
+#   wrangler secret put SWAPCARD_API_KEY
+#   wrangler secret put SWAPCARD_API_KEY --env production
+
+[vars]
+EVENT_ID = "RXZlbnRfMzgxNjMzOA=="
+COMMUNITY_ID = "Q29tbXVuaXR5XzExODYw"
+ALLOWED_ORIGINS = "*"   # tighten this for staging if you want
+
+[env.production]
+name = "ai4-sponsors-prod"
+
+[env.production.vars]
+EVENT_ID = "RXZlbnRfMzgxNjMzOA=="
+COMMUNITY_ID = "Q29tbXVuaXR5XzExODYw"
+ALLOWED_ORIGINS = "https://ai4.io,https://www.ai4.io"
