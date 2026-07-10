@@ -26,7 +26,7 @@
  */
 
 const SWAPCARD_ENDPOINT = "https://developer.swapcard.com/event-admin/graphql";
-const CACHE_TTL_SECONDS = 600;
+const CACHE_TTL_SECONDS = 3600; // 1 hour — serves from edge cache; stale-while-revalidate below means even expired responses are served instantly while a background refresh runs
 const PAGE_SIZE = 100;
 
 // ---------- GraphQL queries ----------
@@ -260,7 +260,7 @@ async function handleSponsors(env, ctx, corsHeaders) {
     status: 200,
     headers: {
       "Content-Type": "application/json",
-      "Cache-Control": `public, max-age=${CACHE_TTL_SECONDS}`,
+      "Cache-Control": `public, max-age=${CACHE_TTL_SECONDS}, stale-while-revalidate=86400`,
       "X-Cache": "MISS",
       ...corsHeaders,
     },
