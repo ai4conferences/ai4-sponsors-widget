@@ -629,6 +629,28 @@
     || window.AI4_SPONSORS_WORKER_URL
     || "https://ai4-sponsors.YOUR-SUBDOMAIN.workers.dev";
 
+  // Custom field filters to hide from the public website widget.
+  // These fields remain fully visible and usable inside Swapcard — they're only hidden here.
+  const HIDDEN_FILTER_FIELDS = new Set([
+    "This company is recruiting!",
+    "Free Giveaway!",
+  ]);
+
+  // Override the label shown for specific booth names (e.g. "Meeting Room" instead of "Booth").
+  // Key = the booth name exactly as returned by Swapcard (usually just the number, e.g. "4610").
+  // Value = the label to display.
+  const BOOTH_LABEL_OVERRIDES = {
+    "4610": "Meeting Room",
+  };
+
+  // Returns the appropriate location label for a booth name.
+  function boothLabel(name) {
+    if (BOOTH_LABEL_OVERRIDES[name]) return BOOTH_LABEL_OVERRIDES[name];
+    // Also auto-detect if Swapcard ever returns the full name with the type embedded.
+    if (/meeting[\s·\-]+room/i.test(name)) return "Meeting Room";
+    return "Booth";
+  }
+
   // Tier ordering — sponsors are grouped by tier name and sections render in this order.
   // Lowercase compare. Tiers not listed fall after these in alpha order.
   const TIER_ORDER = [
@@ -794,6 +816,8 @@
       if (fd.type !== "MultipleSelectFieldDefinition" && fd.type !== "SelectFieldDefinition") continue;
       // Skip the "Include in public list" field — it's used for gating, not filtering.
       if (/include.*public.*list|public.*list/i.test(fd.name)) continue;
+      // Skip fields that are intentionally hidden from the public website widget.
+      if (HIDDEN_FILTER_FIELDS.has(fd.name)) continue;
       // Count usage so we can skip empty fields
       const counts = new Map();
       for (const s of DATA.sponsors) {
@@ -1026,7 +1050,7 @@
       ? `<div class="a4s-card-logo"><img src="${escapeAttr(s.logoUrl)}" alt="${escapeAttr(s.name)} logo" loading="lazy" onerror="this.parentElement.classList.add('is-empty');this.remove();this.parentElement.textContent='${escapeAttr(s.name).slice(0,40)}';"/></div>`
       : `<div class="a4s-card-logo is-empty">${escapeHtml(s.name)}</div>`;
     const meta = booth
-      ? `<span class="a4s-booth-prefix">Booth</span>${escapeHtml(booth)}`
+      ? `<span class="a4s-booth-prefix">${boothLabel(booth)}</span>${escapeHtml(booth)}`
       : `<span class="a4s-booth-prefix">&nbsp;</span><span style="color:var(--a4-text-muted);">—</span>`;
     return `
       <article class="a4s-card" data-id="${escapeAttr(s.id)}" tabindex="0" role="button" aria-label="${escapeAttr(s.name)}">
@@ -1171,7 +1195,7 @@
         <div class="a4s-modal-head-text">
           ${tier ? `<div class="a4s-modal-tier">${escapeHtml(displayTier(tier))}</div>` : ""}
           <h2>${escapeHtml(s.name)}</h2>
-          ${booths.map((b) => `<div class="a4s-modal-booth">Booth ${escapeHtml(b)}</div>`).join("")}
+          ${booths.map((b) => `<div class="a4s-modal-booth">${boothLabel(b)} ${escapeHtml(b)}</div>`).join("")}
           ${bookmarkBtnHtml("sponsor", s.id)}
         </div>
       </div>
@@ -1279,7 +1303,7 @@
               <div class="a4s-org-logo">${fromSponsor.logoUrl ? `<img src="${escapeAttr(fromSponsor.logoUrl)}" alt="" />` : escapeHtml(fromSponsor.name)}</div>
               <div class="a4s-org-info">
                 <div class="a4s-org-name">${escapeHtml(fromSponsor.name)}</div>
-                <div class="a4s-org-meta">${escapeHtml(displayTier(getSponsorTier(fromSponsor)) || "")}${(fromSponsor.booths || []).filter((b) => b && b !== "—").length ? ` · Booth ${escapeHtml((fromSponsor.booths || []).filter((b) => b && b !== "—")[0])}` : ""}</div>
+                <div class="a4s-org-meta">${escapeHtml(displayTier(getSponsorTier(fromSponsor)) || "")}${(fromSponsor.booths || []).filter((b) => b && b !== "—").length ? ` · ${boothLabel((fromSponsor.booths || []).filter((b) => b && b !== "—")[0])} ${escapeHtml((fromSponsor.booths || []).filter((b) => b && b !== "—")[0])}` : ""}</div>
               </div>
             </div>
           </div>` : ""}
@@ -1396,7 +1420,7 @@
                 <div class="a4s-org-logo">${sp.logoUrl ? `<img src="${escapeAttr(sp.logoUrl)}" alt="" />` : escapeHtml(sp.name)}</div>
                 <div class="a4s-org-info">
                   <div class="a4s-org-name">${escapeHtml(sp.name)}</div>
-                  <div class="a4s-org-meta">${escapeHtml(displayTier(getSponsorTier(sp)) || "")}${(sp.booths || []).filter((b) => b && b !== "—").length ? ` · Booth ${escapeHtml((sp.booths || []).filter((b) => b && b !== "—")[0])}` : ""}</div>
+                  <div class="a4s-org-meta">${escapeHtml(displayTier(getSponsorTier(sp)) || "")}${(sp.booths || []).filter((b) => b && b !== "—").length ? ` · ${boothLabel((sp.booths || []).filter((b) => b && b !== "—")[0])} ${escapeHtml((sp.booths || []).filter((b) => b && b !== "—")[0])}` : ""}</div>
                 </div>
                 <svg class="a4s-team-member-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex:0 0 16px;"><path d="m9 18 6-6-6-6"/></svg>
               </div>`).join("")}
