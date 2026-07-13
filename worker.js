@@ -26,7 +26,11 @@
  */
 
 const SWAPCARD_ENDPOINT = "https://developer.swapcard.com/event-admin/graphql";
-const CACHE_TTL_SECONDS = 3600; // 1 hour — serves from edge cache; stale-while-revalidate below means even expired responses are served instantly while a background refresh runs
+// Cache storage TTL: how long the CF Cache entry itself lives (24h).
+// The worker serves stale entries immediately and refreshes in the background,
+// so users never wait for a cold Swapcard fetch after the first load.
+const CACHE_STORAGE_TTL = 86400;   // 24h — cache entry lifetime
+const CACHE_STALE_AFTER = 3600;    // 1h  — trigger background revalidation if older
 const PAGE_SIZE = 100;
 
 // ---------- GraphQL queries ----------
@@ -100,7 +104,7 @@ const EXHIBITORS_QUERY = /* GraphQL */ `
           }
         }
         withEvent(eventId: $eventId) {
-          booths { id name }
+          booths { id name category }
           group { id name }
           members(page: 1, pageSize: 50) {
             id
@@ -200,29 +204,92 @@ export default {
       return json({ error: String(err && err.message || err) }, corsHeaders, 500);
     }
   },
+
+  // Cron trigger: runs on the schedule defined in wrangler.toml.
+  // Pre-warms the sponsors cache so it is never cold when a visitor arrives.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(refreshSponsorsCache(env));
+  },
 };
 
 // ---------- Handlers ----------
 
 async function handleSponsors(env, ctx, corsHeaders) {
-  const cacheKey = new Request("https://cache.local/sponsors", { method: "GET" });
   const cache = caches.default;
+  const cacheKey = new Request("https://cache.local/sponsors", { method: "GET" });
 
   const cached = await cache.match(cacheKey);
   if (cached) {
-    const out = new Response(cached.body, cached);
-    for (const [k, v] of Object.entries(corsHeaders)) out.headers.set(k, v);
-    out.headers.set("X-Cache", "HIT");
-    return out;
+    // Always return the cached response immediately — never block on Swapcard.
+    const generatedAt = cached.headers.get("X-Generated-At");
+    const ageSeconds = generatedAt
+      ? (Date.now() - new Date(generatedAt).getTime()) / 1000
+      : Infinity;
+
+    // If stale, kick off a background refresh so the *next* request is fresh.
+    if (ageSeconds > CACHE_STALE_AFTER) {
+      ctx.waitUntil(refreshSponsorsCache(env));
+    }
+
+    const body = await cached.text();
+    return new Response(body, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": `public, max-age=${CACHE_STALE_AFTER}, stale-while-revalidate=86400`,
+        "X-Cache": ageSeconds > CACHE_STALE_AFTER ? "STALE" : "HIT",
+        ...corsHeaders,
+      },
+    });
   }
 
+  // Cold miss (first ever request or cache fully expired) — must fetch synchronously.
+  const body = await fetchSponsorPayload(env);
+  ctx.waitUntil(storeSponsorCache(body));
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": `public, max-age=${CACHE_STALE_AFTER}, stale-while-revalidate=86400`,
+      "X-Cache": "MISS",
+      ...corsHeaders,
+    },
+  });
+}
+
+// Fetches fresh sponsor data from Swapcard and stores it in the edge cache.
+// Called by the cron trigger and by SWR background revalidation.
+async function refreshSponsorsCache(env) {
+  try {
+    const body = await fetchSponsorPayload(env);
+    await storeSponsorCache(body);
+  } catch (err) {
+    console.error("Background cache refresh failed:", err);
+  }
+}
+
+async function storeSponsorCache(body) {
+  const cache = caches.default;
+  const cacheKey = new Request("https://cache.local/sponsors", { method: "GET" });
+  const stored = new Response(body, {
+    headers: {
+      "Content-Type": "application/json",
+      // Store for 24h so the entry survives across multiple stale-revalidate cycles.
+      "Cache-Control": `public, max-age=${CACHE_STORAGE_TTL}`,
+      "X-Generated-At": new Date().toISOString(),
+    },
+  });
+  await cache.put(cacheKey, stored);
+}
+
+// Fetches all data from Swapcard and returns the normalized JSON string.
+async function fetchSponsorPayload(env) {
   const eventId = env.EVENT_ID;
   const communityId = env.COMMUNITY_ID;
   if (!eventId) throw new Error("EVENT_ID env var not set");
   if (!communityId) throw new Error("COMMUNITY_ID env var not set");
   if (!env.SWAPCARD_API_KEY) throw new Error("SWAPCARD_API_KEY secret not set");
 
-  // Parallel: groups + field definitions + exhibitors
   const [groupsRes, defsRes, exhibitors] = await Promise.all([
     swapcard(env, GROUPS_QUERY, { eventId }),
     swapcard(env, FIELD_DEFINITIONS_QUERY, { eventId }),
@@ -240,33 +307,20 @@ async function handleSponsors(env, ctx, corsHeaders) {
     .map((d) => ({
       id: d.id,
       name: d.name,
-      type: d.__typename, // SelectFieldDefinition / MultipleSelectFieldDefinition / etc.
+      type: d.__typename,
       options: (d.optionsValues || []).map((o) => ({ id: o.id, value: o.value })),
     }));
 
   const sponsors = exhibitors.map((e) => normalizeExhibitor(e));
 
-  const payload = {
+  return JSON.stringify({
     generatedAt: new Date().toISOString(),
     eventId,
     counts: { sponsors: sponsors.length, groups: groups.length },
     groups,
     fieldDefinitions,
     sponsors,
-  };
-
-  const body = JSON.stringify(payload);
-  const response = new Response(body, {
-    status: 200,
-    headers: {
-      "Content-Type": "application/json",
-      "Cache-Control": `public, max-age=${CACHE_TTL_SECONDS}, stale-while-revalidate=86400`,
-      "X-Cache": "MISS",
-      ...corsHeaders,
-    },
   });
-  ctx.waitUntil(cache.put(cacheKey, response.clone()));
-  return response;
 }
 
 async function handleSessions(env, ctx, exhibitorId, corsHeaders) {
@@ -383,6 +437,11 @@ function normalizeSession(p) {
 function normalizeExhibitor(e) {
   const we = e.withEvent || {};
   const booths = (we.booths || []).map((b) => b.name).filter(Boolean);
+  // category is the Swapcard venue type (e.g. "Meeting Room", "Exhibit Hall Booth").
+  // Use it directly as the display label so the website always matches Swapcard.
+  const boothLabels = (we.booths || [])
+    .filter((b) => b && b.name)
+    .map((b) => b.category || "Booth");
   const group = we.group ? { id: we.group.id, name: we.group.name } : null;
 
   // Build a clean, name-keyed view of custom fields.
@@ -432,7 +491,8 @@ function normalizeExhibitor(e) {
     htmlDescription: e.htmlDescription || "",
     logoUrl: e.logoUrl || "",
     websiteUrl: e.websiteUrl || "",
-    booths,                   // ["407", "Room 259"]
+    booths,                   // ["4603", "831"]
+    boothLabels,              // ["Meeting Room", "Booth"] — parallel array of display labels
     sponsorLevel: group,      // { id, name } or null
     socials,                  // [{ type, url }]
     customFields,             // keyed by definition name, e.g. customFields["Product Types"]
