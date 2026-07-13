@@ -6,6 +6,10 @@ compatibility_date = "2025-01-01"
 #   wrangler secret put SWAPCARD_API_KEY
 #   wrangler secret put SWAPCARD_API_KEY --env production
 
+# Cron trigger: pre-warms the sponsors cache every hour so it is never cold.
+[triggers]
+crons = ["0 * * * *"]
+
 [vars]
 EVENT_ID = "RXZlbnRfMzgxNjMzOA=="
 COMMUNITY_ID = "Q29tbXVuaXR5XzExODYw"
@@ -18,3 +22,6 @@ name = "ai4-sponsors-prod"
 EVENT_ID = "RXZlbnRfMzgxNjMzOA=="
 COMMUNITY_ID = "Q29tbXVuaXR5XzExODYw"
 ALLOWED_ORIGINS = "https://ai4.io,https://www.ai4.io"
+
+[env.production.triggers]
+crons = ["0 * * * *"]
