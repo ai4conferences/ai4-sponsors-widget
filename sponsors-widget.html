@@ -1184,7 +1184,6 @@
         ${s.socials.length ? `<div class="a4s-modal-section"><h3>Social Media</h3><div class="a4s-socials">${s.socials.map(renderSocialIcon).join("")}</div></div>` : ""}
         ${s.websiteUrl ? `<div class="a4s-modal-section"><h3>Contact details</h3><a class="a4s-link" href="${escapeAttr(s.websiteUrl)}" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg>${escapeHtml(s.websiteUrl)}</a></div>` : ""}
         <div class="a4s-modal-section a4s-modal-sessions"></div>
-        ${s.team.length ? `<div class="a4s-modal-section"><h3>Team</h3><div class="a4s-team">${s.team.map(renderTeamMember).join("")}</div></div>` : ""}
       </div>`;
   }
 
