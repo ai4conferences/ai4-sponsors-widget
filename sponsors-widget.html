@@ -1087,7 +1087,7 @@
       modal.querySelectorAll(".a4s-team-member").forEach((el) => {
         el.addEventListener("click", () => openPerson(el.getAttribute("data-person-id"), s.id));
       });
-      fetchAndRenderSessions(s.id);
+      fetchAndRenderSessions(s);
     } else if (view.type === "person") {
       const fromSponsor = DATA.sponsors.find((x) => x.id === view.fromSponsorId);
       const person = (fromSponsor?.team || []).find((m) => m.id === view.id);
@@ -1226,7 +1226,9 @@
     });
   }
 
-  async function fetchAndRenderSessions(exhibitorId) {
+  async function fetchAndRenderSessions(sponsor) {
+    const exhibitorId = sponsor.id;
+    const eid = sponsor.eventExhibitorId || "";
     const slot = MODAL && MODAL.querySelector(".a4s-modal-sessions");
     if (!slot) return;
     slot.innerHTML = `<h3>Sessions</h3><div class="a4s-loading-inline">Loading sessions…</div>`;
@@ -1234,7 +1236,9 @@
       let sessions;
       if (sessionsCache.has(exhibitorId)) sessions = sessionsCache.get(exhibitorId);
       else {
-        const res = await fetch(`${WORKER_URL}/sessions?id=${encodeURIComponent(exhibitorId)}`);
+        const params = new URLSearchParams({ id: exhibitorId });
+        if (eid) params.set("eid", eid);
+        const res = await fetch(`${WORKER_URL}/sessions?${params}`);
         if (!res.ok) throw new Error(`status ${res.status}`);
         const data = await res.json();
         sessions = data.sessions || [];
@@ -1297,7 +1301,10 @@
       let sponsorSessions;
       if (sessionsCache.has(fromSponsorId)) sponsorSessions = sessionsCache.get(fromSponsorId);
       else {
-        const res = await fetch(`${WORKER_URL}/sessions?id=${encodeURIComponent(fromSponsorId)}`);
+        const fromSponsorObj = DATA.sponsors.find((s) => s.id === fromSponsorId);
+        const params = new URLSearchParams({ id: fromSponsorId });
+        if (fromSponsorObj?.eventExhibitorId) params.set("eid", fromSponsorObj.eventExhibitorId);
+        const res = await fetch(`${WORKER_URL}/sessions?${params}`);
         if (!res.ok) throw new Error(`status ${res.status}`);
         const data = await res.json();
         sponsorSessions = data.sessions || [];
@@ -1412,7 +1419,10 @@
       let sponsorSessions;
       if (sessionsCache.has(fromSponsorId)) sponsorSessions = sessionsCache.get(fromSponsorId);
       else {
-        const res = await fetch(`${WORKER_URL}/sessions?id=${encodeURIComponent(fromSponsorId)}`);
+        const fromSponsorObj = DATA.sponsors.find((s) => s.id === fromSponsorId);
+        const params = new URLSearchParams({ id: fromSponsorId });
+        if (fromSponsorObj?.eventExhibitorId) params.set("eid", fromSponsorObj.eventExhibitorId);
+        const res = await fetch(`${WORKER_URL}/sessions?${params}`);
         if (!res.ok) throw new Error(`status ${res.status}`);
         const data = await res.json();
         sponsorSessions = data.sessions || [];
