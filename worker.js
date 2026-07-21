@@ -351,7 +351,7 @@ async function handleSessions(env, ctx, exhibitorId, corsHeaders) {
     status: 200,
     headers: {
       "Content-Type": "application/json",
-      "Cache-Control": `public, max-age=${CACHE_TTL_SECONDS}`,
+      "Cache-Control": `public, max-age=${CACHE_STALE_AFTER}`,
       "X-Cache": "MISS",
       ...corsHeaders,
     },
