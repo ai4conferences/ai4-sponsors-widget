@@ -104,7 +104,6 @@ const EXHIBITORS_QUERY = /* GraphQL */ `
           }
         }
         withEvent(eventId: $eventId) {
-          id
           booths { id name category }
           group { id name }
         }
@@ -316,13 +315,10 @@ async function fetchSponsorPayload(env) {
 
 async function handleSessions(env, ctx, url, corsHeaders) {
   const exhibitorId = url.searchParams.get("id") || "";
-  const eventExhibitorId = url.searchParams.get("eid") || "";
 
   const allSessions = await getOrFetchAllSessions(env, ctx);
   const sessions = allSessions
-    .filter((s) => (s.exhibitorIds || []).some(
-      (x) => x === exhibitorId || (eventExhibitorId && x === eventExhibitorId)
-    ))
+    .filter((s) => (s.exhibitorIds || []).includes(exhibitorId))
     .sort((a, b) => (a.beginsAt || "").localeCompare(b.beginsAt || ""));
 
   const body = JSON.stringify({ exhibitorId, sessions });
@@ -490,8 +486,7 @@ function normalizeExhibitor(e) {
 
 
   return {
-    id: e.id,              // community exhibitor ID
-    eventExhibitorId: we.id || null,  // event-scoped ID — also tried when matching sessions
+    id: e.id,              // community exhibitor ID — used for session matching
     name: e.name || "",
     description: e.description || "",
     htmlDescription: e.htmlDescription || "",
