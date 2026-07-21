@@ -104,20 +104,9 @@ const EXHIBITORS_QUERY = /* GraphQL */ `
           }
         }
         withEvent(eventId: $eventId) {
+          id
           booths { id name category }
           group { id name }
-          members(page: 1, pageSize: 50) {
-            id
-            userId
-            firstName
-            lastName
-            jobTitle
-            photoUrl
-            biography
-            organization
-            websiteUrl
-            socialNetworks { type profile }
-          }
         }
       }
     }
@@ -470,33 +459,19 @@ function normalizeExhibitor(e) {
     url: s.profile,
   }));
 
-  const team = (we.members || []).map((m) => ({
-    id: m.id,
-    userId: m.userId || null,
-    firstName: m.firstName || "",
-    lastName: m.lastName || "",
-    fullName: [m.firstName, m.lastName].filter(Boolean).join(" "),
-    jobTitle: m.jobTitle || "",
-    organization: m.organization || "",
-    photoUrl: m.photoUrl || "",
-    biography: m.biography || "",
-    websiteUrl: m.websiteUrl || "",
-    socials: (m.socialNetworks || []).map((s) => ({ type: s.type, url: s.profile })),
-  }));
 
   return {
-    id: e.id,
+    id: we.id || e.id,  // event-scoped ID — matches the exhibitor IDs stored on plannings
     name: e.name || "",
     description: e.description || "",
     htmlDescription: e.htmlDescription || "",
     logoUrl: e.logoUrl || "",
     websiteUrl: e.websiteUrl || "",
-    booths,                   // ["4603", "831"]
-    boothLabels,              // ["Meeting Room", "Booth"] — parallel array of display labels
-    sponsorLevel: group,      // { id, name } or null
-    socials,                  // [{ type, url }]
-    customFields,             // keyed by definition name, e.g. customFields["Product Types"]
-    team,
+    booths,
+    boothLabels,
+    sponsorLevel: group,
+    socials,
+    customFields,
   };
 }
 
