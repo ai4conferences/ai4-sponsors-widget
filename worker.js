@@ -183,9 +183,8 @@ export default {
         return await handleSponsors(env, ctx, corsHeaders);
       }
       if (url.pathname === "/sessions") {
-        const exhibitorId = url.searchParams.get("id");
-        if (!exhibitorId) return json({ error: "missing id" }, corsHeaders, 400);
-        return await handleSessions(env, ctx, exhibitorId, corsHeaders);
+        if (!url.searchParams.get("id")) return json({ error: "missing id" }, corsHeaders, 400);
+        return await handleSessions(env, ctx, url, corsHeaders);
       }
       return json({ error: "not found" }, corsHeaders, 404);
     } catch (err) {
@@ -195,9 +194,12 @@ export default {
   },
 
   // Cron trigger: runs on the schedule defined in wrangler.toml.
-  // Pre-warms the sponsors cache so it is never cold when a visitor arrives.
+  // Pre-warms the sponsors and sessions caches so they are never cold when a visitor arrives.
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(refreshSponsorsCache(env));
+    ctx.waitUntil(Promise.all([
+      refreshSponsorsCache(env),
+      refreshSessionsCache(env),
+    ]));
   },
 };
 
@@ -312,41 +314,68 @@ async function fetchSponsorPayload(env) {
   });
 }
 
-async function handleSessions(env, ctx, exhibitorId, corsHeaders) {
-  const eventId = env.EVENT_ID;
-  const communityId = env.COMMUNITY_ID;
-  if (!eventId || !communityId) throw new Error("EVENT_ID or COMMUNITY_ID not set");
+async function handleSessions(env, ctx, url, corsHeaders) {
+  const exhibitorId = url.searchParams.get("id") || "";
+  const eventExhibitorId = url.searchParams.get("eid") || "";
 
-  const cacheKey = new Request(`https://cache.local/sessions/${encodeURIComponent(exhibitorId)}`);
-  const cache = caches.default;
-  const cached = await cache.match(cacheKey);
-  if (cached) {
-    const out = new Response(cached.body, cached);
-    for (const [k, v] of Object.entries(corsHeaders)) out.headers.set(k, v);
-    out.headers.set("X-Cache", "HIT");
-    return out;
-  }
-
-  // Fetch all plannings for the event, then filter to those linked to this exhibitor.
-  // (Swapcard does not currently expose a direct "exhibitor.plannings" connection.)
-  const all = await fetchAllPlannings(env, communityId, eventId);
-  const sessions = all
-    .filter((p) => (p.exhibitors || []).some((x) => x.id === exhibitorId))
-    .map((p) => normalizeSession(p))
+  const allSessions = await getOrFetchAllSessions(env, ctx);
+  const sessions = allSessions
+    .filter((s) => (s.exhibitorIds || []).some(
+      (x) => x === exhibitorId || (eventExhibitorId && x === eventExhibitorId)
+    ))
     .sort((a, b) => (a.beginsAt || "").localeCompare(b.beginsAt || ""));
 
   const body = JSON.stringify({ exhibitorId, sessions });
-  const response = new Response(body, {
+  return new Response(body, {
     status: 200,
     headers: {
       "Content-Type": "application/json",
-      "Cache-Control": `public, max-age=${CACHE_STALE_AFTER}`,
-      "X-Cache": "MISS",
+      "Cache-Control": `public, max-age=${CACHE_STALE_AFTER}, stale-while-revalidate=86400`,
+      "X-Cache": "computed",
       ...corsHeaders,
     },
   });
-  ctx.waitUntil(cache.put(cacheKey, response.clone()));
-  return response;
+}
+
+// Returns all normalized sessions, using a shared SWR cache so the heavy
+// Swapcard plannings fetch only happens once per hour regardless of how many
+// exhibitors are clicked.
+async function getOrFetchAllSessions(env, ctx) {
+  const cache = caches.default;
+  const cacheKey = new Request("https://cache.local/all-sessions-v1", { method: "GET" });
+
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    const generatedAt = cached.headers.get("X-Generated-At");
+    const ageSeconds = generatedAt
+      ? (Date.now() - new Date(generatedAt).getTime()) / 1000
+      : Infinity;
+    if (ageSeconds > CACHE_STALE_AFTER) {
+      ctx.waitUntil(refreshSessionsCache(env));
+    }
+    return JSON.parse(await cached.text());
+  }
+
+  // Cold miss — fetch synchronously.
+  return refreshSessionsCache(env);
+}
+
+async function refreshSessionsCache(env) {
+  const communityId = env.COMMUNITY_ID;
+  const eventId = env.EVENT_ID;
+  const raw = await fetchAllPlannings(env, communityId, eventId);
+  const sessions = raw.map(normalizeSession);
+
+  const cache = caches.default;
+  const stored = new Response(JSON.stringify(sessions), {
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": `public, max-age=${CACHE_STORAGE_TTL}`,
+      "X-Generated-At": new Date().toISOString(),
+    },
+  });
+  await cache.put(new Request("https://cache.local/all-sessions-v1", { method: "GET" }), stored);
+  return sessions;
 }
 
 // ---------- Pagination loops ----------
@@ -461,7 +490,8 @@ function normalizeExhibitor(e) {
 
 
   return {
-    id: e.id,  // community exhibitor ID — matches the exhibitor IDs referenced in plannings
+    id: e.id,              // community exhibitor ID
+    eventExhibitorId: we.id || null,  // event-scoped ID — also tried when matching sessions
     name: e.name || "",
     description: e.description || "",
     htmlDescription: e.htmlDescription || "",
