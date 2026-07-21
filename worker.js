@@ -205,7 +205,7 @@ export default {
 
 async function handleSponsors(env, ctx, corsHeaders) {
   const cache = caches.default;
-  const cacheKey = new Request("https://cache.local/sponsors", { method: "GET" });
+  const cacheKey = new Request("https://cache.local/sponsors-v2", { method: "GET" });
 
   const cached = await cache.match(cacheKey);
   if (cached) {
@@ -259,7 +259,7 @@ async function refreshSponsorsCache(env) {
 
 async function storeSponsorCache(body) {
   const cache = caches.default;
-  const cacheKey = new Request("https://cache.local/sponsors", { method: "GET" });
+  const cacheKey = new Request("https://cache.local/sponsors-v2", { method: "GET" });
   const stored = new Response(body, {
     headers: {
       "Content-Type": "application/json",
@@ -461,7 +461,7 @@ function normalizeExhibitor(e) {
 
 
   return {
-    id: we.id || e.id,  // event-scoped ID — matches the exhibitor IDs stored on plannings
+    id: e.id,  // community exhibitor ID — matches the exhibitor IDs referenced in plannings
     name: e.name || "",
     description: e.description || "",
     htmlDescription: e.htmlDescription || "",
