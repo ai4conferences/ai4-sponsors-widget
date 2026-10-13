@@ -6,10 +6,6 @@ compatibility_date = "2025-01-01"
 #   wrangler secret put SWAPCARD_API_KEY
 #   wrangler secret put SWAPCARD_API_KEY --env production
 
-# Cron trigger: pre-warms the sponsors cache every hour so it is never cold.
-[triggers]
-crons = ["0 * * * *"]
-
 [vars]
 EVENT_ID = "RXZlbnRfMzgxNjMzOA=="
 COMMUNITY_ID = "Q29tbXVuaXR5XzExODYw"
@@ -17,11 +13,44 @@ ALLOWED_ORIGINS = "*"   # tighten this for staging if you want
 
 [env.production]
 name = "ai4-sponsors-prod"
+# Keep the JSON API on ai4-sponsors-prod.<subdomain>.workers.dev. Wrangler
+# turns workers.dev OFF by default once routes are added, which would break
+# the widget's data-worker-url.
+workers_dev = true
+
+# Server-rendered sponsor pages on the public site. Paths under this pattern
+# that aren't a sponsor pass straight through to WordPress.
+routes = [
+  { pattern = "ai4.com/sponsors-exhibitors*", zone_name = "ai4.com" },
+  { pattern = "www.ai4.com/sponsors-exhibitors*", zone_name = "ai4.com" },
+]
+
+# Lets session speakers on sponsor pages link to ai4.com/speakers/<slug>/
+# (a Worker can't fetch another Worker's workers.dev URL on the same account).
+services = [
+  { binding = "SPEAKERS", service = "ai4-speakers" },
+]
+
+# Optional but recommended for server-rendered pages: a global copy of the
+# sponsor data (the default cache is per Cloudflare location), refreshed
+# hourly by a cron. To enable:
+#   npx wrangler kv namespace create SPONSORS_KV --env production
+# then uncomment both blocks below and paste the id.
+# [[env.production.kv_namespaces]]
+# binding = "SPONSORS_KV"
+# id = "PASTE_ID_HERE"
+#
+# [env.production.triggers]
+crons = ["0 * * * *"]
 
 [env.production.vars]
 EVENT_ID = "RXZlbnRfMzgxNjMzOA=="
 COMMUNITY_ID = "Q29tbXVuaXR5XzExODYw"
-ALLOWED_ORIGINS = "https://ai4.io,https://www.ai4.io"
-
-[env.production.triggers]
-crons = ["0 * * * *"]
+ALLOWED_ORIGINS = "https://ai4.io,https://www.ai4.io,https://media.ai4.io,https://www.ai4.com,https://ai4.com"
+# ── SSR / SEO settings ──
+SITE_HOSTS       = "ai4.com,www.ai4.com"
+SITE_ORIGIN      = "https://ai4.com"
+SPONSORS_PATH    = "/sponsors-exhibitors/"
+EVENT_LABEL      = "Ai4 2026"
+# Session links go to the Swapcard agenda. Update the event slug each year.
+SESSION_URL_BASE = "https://ai4.app.swapcard.com/event/ai4-2026/planning/"

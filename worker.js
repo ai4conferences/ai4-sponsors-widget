@@ -25,6 +25,8 @@
  *   GET /health              → uncached health probe
  */
 
+import { isSiteRequest, handleSite, withSlugs } from "./seo.js";
+
 const SWAPCARD_ENDPOINT = "https://developer.swapcard.com/event-admin/graphql";
 // Cache storage TTL: how long the CF Cache entry itself lives (24h).
 // The worker serves stale entries immediately and refreshes in the background,
@@ -168,6 +170,18 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const origin = request.headers.get("Origin") || "";
+
+    // Requests on the public site (ai4.com/sponsors-exhibitors*) get
+    // server-rendered HTML (see seo.js). "/api/..." always means the JSON API
+    // on any host, and so does any cross-origin fetch() (it carries an Origin
+    // header from another site); page navigations don't.
+    let apiPath = url.pathname;
+    if (apiPath === "/api" || apiPath.startsWith("/api/")) {
+      apiPath = apiPath.slice(4) || "/";
+    } else if (isSiteRequest(url, env) && !(origin && origin !== url.origin)) {
+      return handleSite(request, env, ctx, { loadSponsors, loadSessions });
+    }
+
     const corsHeaders = buildCorsHeaders(origin, env.ALLOWED_ORIGINS || "");
 
     if (request.method === "OPTIONS") {
@@ -175,13 +189,13 @@ export default {
     }
 
     try {
-      if (url.pathname === "/health") {
+      if (apiPath === "/health") {
         return json({ ok: true, time: new Date().toISOString() }, corsHeaders);
       }
-      if (url.pathname === "/sponsors") {
+      if (apiPath === "/sponsors") {
         return await handleSponsors(env, ctx, corsHeaders);
       }
-      if (url.pathname === "/sessions") {
+      if (apiPath === "/sessions") {
         if (!url.searchParams.get("id")) return json({ error: "missing id" }, corsHeaders, 400);
         return await handleSessions(env, ctx, url, corsHeaders);
       }
@@ -235,7 +249,7 @@ async function handleSponsors(env, ctx, corsHeaders) {
 
   // Cold miss (first ever request or cache fully expired) — must fetch synchronously.
   const body = await fetchSponsorPayload(env);
-  ctx.waitUntil(storeSponsorCache(body));
+  ctx.waitUntil(storeSponsorCache(body, env));
   return new Response(body, {
     status: 200,
     headers: {
@@ -252,13 +266,19 @@ async function handleSponsors(env, ctx, corsHeaders) {
 async function refreshSponsorsCache(env) {
   try {
     const body = await fetchSponsorPayload(env);
-    await storeSponsorCache(body);
+    await storeSponsorCache(body, env);
   } catch (err) {
     console.error("Background cache refresh failed:", err);
   }
 }
 
-async function storeSponsorCache(body) {
+async function storeSponsorCache(body, env) {
+  const generatedAt = new Date().toISOString();
+  // Optional global copy in KV so every Cloudflare location has warm data
+  // for server-rendered pages (the Cache API is per-location).
+  if (env && env.SPONSORS_KV) {
+    await env.SPONSORS_KV.put("sponsors-v2", body, { metadata: { generatedAt }, expirationTtl: CACHE_STORAGE_TTL * 2 });
+  }
   const cache = caches.default;
   const cacheKey = new Request("https://cache.local/sponsors-v2", { method: "GET" });
   const stored = new Response(body, {
@@ -266,10 +286,57 @@ async function storeSponsorCache(body) {
       "Content-Type": "application/json",
       // Store for 24h so the entry survives across multiple stale-revalidate cycles.
       "Cache-Control": `public, max-age=${CACHE_STORAGE_TTL}`,
-      "X-Generated-At": new Date().toISOString(),
+      "X-Generated-At": generatedAt,
     },
   });
   await cache.put(cacheKey, stored);
+}
+
+// ---------- Loaders for server-side rendering (seo.js) ----------
+// Cache first; stale data is served and refreshed in the background. With
+// allowCold=false a cold cache returns null (and warms in the background)
+// instead of making a page view wait on Swapcard.
+
+async function loadSponsors(env, ctx, { allowCold = false } = {}) {
+  let body = null;
+  let generatedAt = null;
+  const cached = await caches.default.match(new Request("https://cache.local/sponsors-v2", { method: "GET" }));
+  if (cached) {
+    generatedAt = cached.headers.get("X-Generated-At");
+    body = await cached.text();
+  } else if (env.SPONSORS_KV) {
+    try {
+      const { value, metadata } = await env.SPONSORS_KV.getWithMetadata("sponsors-v2");
+      if (value) { body = value; generatedAt = metadata && metadata.generatedAt; }
+    } catch (_) {}
+  }
+  if (body) {
+    const age = generatedAt ? (Date.now() - new Date(generatedAt).getTime()) / 1000 : Infinity;
+    if (age > CACHE_STALE_AFTER) ctx.waitUntil(refreshSponsorsCache(env));
+    return { data: JSON.parse(body), generatedAt };
+  }
+  if (!allowCold) {
+    ctx.waitUntil(refreshSponsorsCache(env));
+    return null;
+  }
+  const fresh = await fetchSponsorPayload(env);
+  ctx.waitUntil(storeSponsorCache(fresh, env));
+  return { data: JSON.parse(fresh), generatedAt: new Date().toISOString() };
+}
+
+async function loadSessions(env, ctx, { allowCold = false } = {}) {
+  const cached = await caches.default.match(new Request("https://cache.local/all-sessions-v1", { method: "GET" }));
+  if (cached) {
+    const generatedAt = cached.headers.get("X-Generated-At");
+    const age = generatedAt ? (Date.now() - new Date(generatedAt).getTime()) / 1000 : Infinity;
+    if (age > CACHE_STALE_AFTER) ctx.waitUntil(refreshSessionsCache(env).catch(console.error));
+    return JSON.parse(await cached.text());
+  }
+  if (!allowCold) {
+    ctx.waitUntil(refreshSessionsCache(env).catch(console.error));
+    return null;
+  }
+  return refreshSessionsCache(env);
 }
 
 // Fetches all data from Swapcard and returns the normalized JSON string.
@@ -301,7 +368,8 @@ async function fetchSponsorPayload(env) {
       options: (d.optionsValues || []).map((o) => ({ id: o.id, value: o.value })),
     }));
 
-  const sponsors = exhibitors.map((e) => normalizeExhibitor(e));
+  // slug = the sponsor's URL on ai4.com (/sponsors-exhibitors/<slug>/).
+  const sponsors = withSlugs(exhibitors.map((e) => normalizeExhibitor(e)));
 
   return JSON.stringify({
     generatedAt: new Date().toISOString(),

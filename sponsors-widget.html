@@ -16,7 +16,7 @@
     - Click any card → modal with full sponsor profile
     - Filters live in a horizontal bar at the top so the grid runs full width
 -->
-<div id="ai4-sponsors-root" class="ai4-sponsors-scope">
+<div id="ai4-sponsors-root" class="ai4-sponsors-scope" data-hide-booths>
 <style>
   /* ===== Scoped reset ===== */
   :is(#ai4-sponsors-root, .ai4-sponsors-scope), :is(#ai4-sponsors-root, .ai4-sponsors-scope) * { box-sizing: border-box; }
@@ -187,6 +187,8 @@
   }
   .a4s-card:hover::before { opacity: 1; }
   .a4s-card:focus-visible { outline: 3px solid var(--a4-purple); outline-offset: 2px; }
+  a.a4s-card, a.a4s-card:hover, a.a4s-card:visited { display: block; color: inherit; text-decoration: none; }
+  .a4s-sr-only { position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   :is(#ai4-sponsors-root, .ai4-sponsors-scope) .a4s-card-logo {
     aspect-ratio: 4/3;
     background: #fff;
@@ -615,7 +617,15 @@
   // ────────────────────────────────────────────────────────────
   const WORKER_URL = ROOT.getAttribute("data-worker-url")
     || window.AI4_SPONSORS_WORKER_URL
-    || "https://ai4-sponsors.YOUR-SUBDOMAIN.workers.dev";
+    || "https://ai4-sponsors-prod.ai4io.workers.dev";
+
+  // Public URL prefix for sponsor profile pages (served by the Worker on
+  // ai4.com). Cards link to SPONSOR_PAGE_BASE + slug + "/".
+  const SPONSOR_PAGE_BASE = ROOT.getAttribute("data-sponsor-base") || "/sponsors-exhibitors/";
+  // Sessions link to their page in the Swapcard agenda. Update the event
+  // slug (ai4-2026) each year, or set data-session-url-base on the root div.
+  const SESSION_URL_BASE = ROOT.getAttribute("data-session-url-base")
+    || "https://ai4.app.swapcard.com/event/ai4-2026/planning/";
 
   // Custom field filters to hide from the public website widget.
   // These fields remain fully visible and usable inside Swapcard — they're only hidden here.
@@ -722,6 +732,9 @@
   init().catch((err) => {
     console.error(err);
     const content = $(".a4s-content");
+    // Server-rendered cards are still valid links to each sponsor's page —
+    // keep them rather than replacing the grid with an error.
+    if (content && content.hasAttribute("data-ssr") && content.querySelector(".a4s-card")) return;
     if (content) content.innerHTML =
       `<div class="a4s-error">Couldn’t load sponsors. ${escapeHtml(err.message || String(err))}</div>`;
   });
@@ -770,7 +783,8 @@
 
     buildFilterDefs();
     renderFilters();
-    render();
+    wireCardClicks();
+    render({ reuseSsr: true });
     wireGlobalEvents();
   }
 
@@ -964,7 +978,7 @@
   // ────────────────────────────────────────────────────────────
   // RENDER GRID (grouped by tier)
   // ────────────────────────────────────────────────────────────
-  function render() {
+  function render(opts) {
     const filtered = applyFilters(DATA.sponsors);
 
     const content = $(".a4s-content");
@@ -995,15 +1009,35 @@
     if (noTier.length) {
       html += renderTierSection("Other", noTier.sort((a, b) => a.name.localeCompare(b.name)));
     }
-    content.innerHTML = html;
+    // First render on a server-rendered page: if the cards already in the
+    // HTML are exactly these sponsors in this order, keep them (no flicker).
+    if (opts && opts.reuseSsr && content.hasAttribute("data-ssr")) {
+      const domIds = Array.from(content.querySelectorAll(".a4s-card[data-id]"), (el) => el.getAttribute("data-id"));
+      const ids = [];
+      for (const tier of tierOrder) for (const s of byTier.get(tier)) ids.push(s.id);
+      for (const s of noTier) ids.push(s.id);
+      if (domIds.length === ids.length && domIds.every((id, i) => id === ids[i])) return;
+    }
 
-    // Wire card clicks
-    content.querySelectorAll(".a4s-card").forEach((el) => {
-      const id = el.getAttribute("data-id");
-      el.addEventListener("click", () => openModal(id));
-      el.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openModal(id); }
-      });
+    content.innerHTML = html;
+  }
+
+  // One delegated handler for all cards (server-rendered or client-rendered).
+  // Plain click opens the modal; cmd/ctrl/shift/middle-click follow the link.
+  function wireCardClicks() {
+    const content = $(".a4s-content");
+    content.addEventListener("click", (e) => {
+      const card = e.target.closest(".a4s-card[data-id]");
+      if (!card || !content.contains(card)) return;
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const id = card.getAttribute("data-id");
+      if (!DATA.sponsors.some((s) => s.id === id)) return; // let the link navigate
+      e.preventDefault();
+      openModal(id, card.getAttribute("href"));
+    });
+    content.addEventListener("keydown", (e) => {
+      const card = e.target.closest("article.a4s-card[data-id]");
+      if (card && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openModal(card.getAttribute("data-id")); }
     });
   }
 
@@ -1029,8 +1063,15 @@
 
   function renderCard(s) {
     const logoSection = s.logoUrl
-      ? `<div class="a4s-card-logo"><img src="${escapeAttr(s.logoUrl)}" alt="${escapeAttr(s.name)} logo" loading="lazy" onerror="this.parentElement.classList.add('is-empty');this.remove();this.parentElement.textContent='${escapeAttr(s.name).slice(0,40)}';"/></div>`
+      ? `<div class="a4s-card-logo"><img src="${escapeAttr(s.logoUrl)}" alt="${escapeAttr(s.name)} logo" loading="lazy" onerror="var p=this.parentElement;p.classList.add('is-empty');p.textContent=this.alt.replace(/ logo$/,'');"/></div>`
       : `<div class="a4s-card-logo is-empty">${escapeHtml(s.name)}</div>`;
+    // Real link when the sponsor has a profile page (slug from the Worker).
+    if (s.slug) {
+      return `
+      <a class="a4s-card" href="${escapeAttr(SPONSOR_PAGE_BASE + s.slug + "/")}" data-id="${escapeAttr(s.id)}" aria-label="${escapeAttr(s.name)}">
+        ${logoSection}${s.logoUrl ? `<span class="a4s-sr-only">${escapeHtml(s.name)}</span>` : ""}
+      </a>`;
+    }
     return `
       <article class="a4s-card" data-id="${escapeAttr(s.id)}" tabindex="0" role="button" aria-label="${escapeAttr(s.name)}">
         ${logoSection}
@@ -1046,7 +1087,19 @@
   let viewStack = [];
   const personFetchCache = new Map(); // personId -> { person, sessions }
 
-  function openModal(id) {
+  // Deep links: opening a sponsor from the grid puts its profile URL in the
+  // address bar (shareable; refreshing loads the server-rendered profile).
+  // Back / Escape / close return to the list URL.
+  window.addEventListener("popstate", () => {
+    if (BACKDROP && BACKDROP.classList.contains("open") && !(history.state && history.state.a4sSponsorModal)) {
+      closeModal({ fromPopstate: true });
+    }
+  });
+
+  function openModal(id, href) {
+    if (href && window.history && history.pushState) {
+      history.pushState({ a4sSponsorModal: true }, "", href);
+    }
     viewStack = [{ type: "sponsor", id }];
     BACKDROP.classList.add("open");
     document.body.style.overflow = "hidden";
@@ -1067,7 +1120,11 @@
     if (viewStack.length === 0) closeModal();
     else renderCurrentView();
   }
-  function closeModal() {
+  function closeModal(opts) {
+    if (!(opts && opts.fromPopstate) && history.state && history.state.a4sSponsorModal) {
+      history.back(); // the popstate handler finishes closing
+      return;
+    }
     BACKDROP.classList.remove("open");
     document.body.style.overflow = "";
     viewStack = [];
@@ -1386,7 +1443,10 @@
           </div>` : ""}
       </div>
       <div class="a4s-modal-body">
-        <div style="display:flex; justify-content:flex-end; margin-bottom: 8px;">${bookmarkBtnHtml("session", session.id)}</div>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom: 8px;">
+          ${SESSION_URL_BASE ? `<a class="a4s-link" href="${escapeAttr(SESSION_URL_BASE + encodeURIComponent(session.id).replace(/%3D/g, "="))}" target="_blank" rel="noopener">View in the Ai4 agenda →</a>` : "<span></span>"}
+          ${bookmarkBtnHtml("session", session.id)}
+        </div>
         ${session.description ? `<div class="a4s-modal-section"><h3>Information</h3><p>${escapeHtml(session.description)}</p></div>` : ""}
         ${customMS.map(([k, v]) => `<div class="a4s-modal-section"><h3>${escapeHtml(k)}</h3><div class="a4s-pills">${v.values.map((x) => `<span class="a4s-pill">${escapeHtml(prettifyValue(x))}</span>`).join("")}</div></div>`).join("")}
         ${session.speakerNames?.length ? `<div class="a4s-modal-section"><h3>Speakers</h3><div class="a4s-pills">${session.speakerNames.map((n) => `<span class="a4s-pill">${escapeHtml(n)}</span>`).join("")}</div></div>` : ""}
